@@ -1,4 +1,4 @@
-# DIE: Revibed
+# DIE: Revibed - A server emulator powered by AI.
 
 **A personal server emulator for _Dead Island: Epidemic_. Version 0.2.**
 

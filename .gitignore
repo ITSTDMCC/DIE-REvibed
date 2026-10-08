@@ -1,0 +1,45 @@
+# Machine-local output: inventories, extracted data, decompiler output
+local/
+extracted/
+decompiled/
+
+# Game binaries and data (never commit these)
+*.exe
+*.dll
+*.pdb
+*.assets
+*.resS
+*.resource
+*.unity3d
+*.bundle
+*.sexp
+level[0-9]*
+mainData
+unity default resources
+unity_builtin_extra
+
+# Media (never commit original or derived art/audio)
+*.png
+*.jpg
+*.jpeg
+*.tga
+*.dds
+*.bmp
+*.psd
+*.wav
+*.ogg
+*.mp3
+*.fsb
+*.fev
+*.fbx
+*.obj
+
+# Build output and logs
+bin/
+obj/
+logs/
+
+# Personal data: the account file holds the player's Steam ID and profile (never commit)
+account.txt
+account*.txt
+*.account

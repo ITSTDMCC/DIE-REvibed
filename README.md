@@ -1,0 +1,516 @@
+# DIE: Revibed
+
+**A personal server emulator for _Dead Island: Epidemic_. Version 0.2.**
+
+_Dead Island: Epidemic_ (Stunlock Studios, published by Deep Silver, 2014–2015) was an
+online-only top-down action game that never left open beta. Its official servers shut
+down on 15 October 2015, and since then the game cannot be played at all. Even people
+who still have it in their Steam library can't get past the login screen.
+
+DIE: Revibed is a replacement server written from scratch. You run it on your own PC and
+point your own copy of the game at it. With it you can play the game solo again: the
+tutorial, practice missions, Horde, and Scavenger against bots.
+
+This is a non-commercial preservation project, made for personal use. It's shared in
+case anyone else who still owns the game would like to see it running again.
+
+> **Not affiliated** with Deep Silver, Plaion, Koch Media, Techland or Stunlock Studios.
+> _Dead Island_ and _Dead Island: Epidemic_ are trademarks of their respective owners.
+> If a rights holder asks for this repository to be taken down, it will be.
+
+---
+
+## Contents
+
+- [What this repository is (and isn't)](#what-this-repository-is-and-isnt)
+- [Requirements](#requirements)
+- [Setup, step by step](#setup-step-by-step)
+- [Playing: vanilla or unlock-all](#playing-vanilla-or-unlock-all)
+- [What works](#what-works)
+- [Stopping and undoing everything](#stopping-and-undoing-everything)
+- [Troubleshooting](#troubleshooting)
+- [Known limitations](#known-limitations)
+- [How it works](#how-it-works)
+- [Repository layout](#repository-layout)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+---
+
+## What this repository is (and isn't)
+
+- **No game files.** This repository contains no game code, binaries, libraries, art,
+  audio, maps or data tables, and no files extracted or derived from them. Everything
+  here is newly written: the server, the scripts and the notes.
+- **You need your own copy.** At run time the server loads game logic and data from
+  *your* installed copy of the game. Nothing is copied out of it, and your game's
+  program files are never changed.
+- **No cracks, no DRM workarounds.** The game talks to Steam when it starts, and
+  DIE: Revibed leaves that alone. You must own the game on Steam, and Steam must be
+  running. Cracked or pirated copies are not supported, and requests for help with them
+  will be ignored.
+- **The one change to your install** is a small text file in the game folder, `ip.cfg`,
+  which tells the game which server to connect to. A script backs it up first and can
+  put it back.
+
+### Who can use this
+
+You need _Dead Island: Epidemic_ (Steam app 222900) **already in your Steam library**.
+The game was removed from sale years ago and **can no longer be bought or added to a
+Steam account in any way**. If you don't already own it, this project can't help you,
+and please don't ask for game files.
+
+---
+
+## Requirements
+
+| What | Details |
+|---|---|
+| Windows 10 or 11 | The scripts are Windows batch and PowerShell files. |
+| _Dead Island: Epidemic_ on Steam | In your library and installed. The default install folder is `C:\Program Files (x86)\Steam\steamapps\common\Dead Island Epidemic`. |
+| Steam | Running and logged in to the account that owns the game. |
+| **32-bit** Mono for Windows | The server runs the game's own match logic, which needs Mono. Tested with Mono 6.12. Install the **x86 (32-bit)** build from <https://www.mono-project.com/download/stable/#download-win>. The 64-bit build will not work. |
+| .NET Framework 4.x | Already part of Windows 10 and 11. Its built-in C# compiler builds the server. |
+| About 300 MB of free RAM | The server holds a full match in memory. |
+
+You don't need Visual Studio, Unity or any other development tools.
+
+---
+
+## Setup, step by step
+
+This guide assumes no programming experience. Expect it to take 15 to 30 minutes the first
+time. Steps 1 to 5 are done **once**; after that, steps 6 and 7 are all you need each time
+you want to play.
+
+You'll type a few commands into a **Command Prompt**. This is a window where you type an
+instruction and press **Enter** to run it. Copy each command exactly as shown:
+select it, press `Ctrl+C`, click in the Command Prompt window, then right-click (or press
+`Ctrl+V`) to paste it, and press **Enter**.
+
+### Step 1. Install the game
+
+1. Open **Steam** and log in to the account that owns _Dead Island: Epidemic_.
+2. Click **Library** at the top.
+3. Find **Dead Island: Epidemic** in the list on the left. Type `dead island` in the search
+   box above the list to find it quickly.
+   - If it isn't listed, open the drop-down above the list and make sure it shows
+     **All games**. If it's still not there, the game isn't on this Steam account.
+4. Click the game, then click the blue **Install** button and follow Steam's prompts.
+5. When the download finishes, click **Play** once. The game will fail to connect. That's
+   expected, because the official servers are gone. Close it. This first launch makes sure
+   the install is complete.
+6. **Find out where the game is installed.** In your Library, right-click
+   **Dead Island: Epidemic**, then choose **Manage → Browse local files**. A folder window
+   opens. Click the address bar at the top of that window and write down the path it
+   shows.
+   - If the path is exactly
+     `C:\Program Files (x86)\Steam\steamapps\common\Dead Island Epidemic`, you have the
+     **default location**. That's the easy case: you can skip every "if your game is
+     somewhere else" note below.
+   - If it's anything else (for example `D:\SteamLibrary\steamapps\common\Dead Island Epidemic`),
+     keep it handy. You'll need it in steps 5 and 6.
+
+### Step 2. Install 32-bit Mono
+
+Mono is a free program the server needs to run the game's own match code. It has to be the
+**32-bit** version.
+
+1. Open <https://www.mono-project.com/download/stable/#download-win> in your web browser.
+2. Under **Windows**, download the **32-bit** installer (labelled "Mono 32-bit (no GTK#)" or
+   "x86"). **Don't** pick the 64-bit one.
+3. Open the downloaded `.msi` file. Click **Next** through the installer, keeping all the
+   default options, and click **Install**. Allow the installer to make changes if Windows
+   asks.
+4. **Check it worked:** open File Explorer and go to `C:\Program Files (x86)\Mono\bin`.
+   You should see a file called `mono.exe` (it may show as just `mono`). If the folder
+   doesn't exist, you probably installed the 64-bit version; uninstall it and install the
+   32-bit one.
+
+### Step 3. Download DIE: Revibed
+
+1. On this repository's GitHub page, click the green **Code** button, then
+   **Download ZIP**.
+2. Open your **Downloads** folder, right-click the downloaded ZIP file and choose
+   **Extract All…**.
+3. In the box that appears, change the destination to `C:\` and click **Extract**. This
+   creates a folder such as `C:\DIE-Revibed-main`.
+4. Rename that folder to `DIE-Revibed`: right-click it, choose **Rename**, type
+   `DIE-Revibed`, and press **Enter**. You should now have `C:\DIE-Revibed`, and inside it
+   folders called `server`, `tools` and `docs`, plus this README.
+   - If you see only one folder inside it, with the same name again, the files are one
+     level too deep. Open that inner folder, select everything inside it (`Ctrl+A`), cut
+     it (`Ctrl+X`), go back up to `C:\DIE-Revibed`, and paste (`Ctrl+V`).
+   - Don't put it inside `C:\Program Files`. Windows protects that folder and the server
+     won't be able to save your account there.
+
+(If you already use Git, you can instead run `git clone <this repository's URL> C:\DIE-Revibed`.)
+
+### Step 4. Open a Command Prompt and build the server
+
+You'll use this window for steps 4 to 6.
+
+1. Open File Explorer and go to `C:\DIE-Revibed`.
+2. Click once in the **address bar** at the top of the window (where it says
+   `C:\DIE-Revibed`), so the text is highlighted.
+3. Type `cmd` and press **Enter**.
+
+A black window opens, and its last line ends with `C:\DIE-Revibed>`. That means it's
+working in the right folder.
+
+Now build the server. Type this and press **Enter**:
+
+```bat
+server\build.cmd
+```
+
+After a few seconds the last line should read:
+
+```
+Built bin\EpidemicServer.exe
+```
+
+If it says `Could not find the .NET Framework 4 C# compiler`, run Windows Update. Windows
+10 and 11 normally include it. You only need to build once, and again after you download
+a newer version of DIE: Revibed.
+
+### Step 5. Point the game at your own PC
+
+The game has a small settings file, `ip.cfg`, that says which servers to connect to. This
+step changes it to `127.0.0.1`, which means "this computer". A backup of the original is
+saved next to it as `ip.cfg.original`, so you can always undo this.
+
+**Default install location:** in the same Command Prompt window, type:
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\point-client-at-local.ps1
+```
+
+**Game installed somewhere else:** use this instead, replacing the path inside the quotes
+with the one you wrote down in step 1:
+
+```bat
+powershell -ExecutionPolicy Bypass -File tools\point-client-at-local.ps1 -GameDir "D:\SteamLibrary\steamapps\common\Dead Island Epidemic"
+```
+
+It should reply:
+
+```
+ip.cfg now points at 127.0.0.1 (original saved as ip.cfg.original)
+```
+
+- **`Access to the path ... is denied`:** Windows needs administrator rights to change
+  this file. Close the Command Prompt, click **Start**, type `cmd`, right-click
+  **Command Prompt**, choose **Run as administrator**, then type `cd /d C:\DIE-Revibed`,
+  press **Enter**, and run the command again.
+- **`ip.cfg not found`:** the path is wrong. Check it again with **Browse local files**
+  (step 1).
+
+You only do this once. If you ever use Steam's **Verify integrity of game files**, Steam
+may put the original file back. If the game stops connecting after that, run this step
+again.
+
+### Step 6. Start the server
+
+In the Command Prompt window, type:
+
+**Default install location:**
+
+```bat
+tools\run_server_mono.cmd
+```
+
+**Game installed somewhere else** (your path, in quotes):
+
+```bat
+tools\run_server_mono.cmd "D:\SteamLibrary\steamapps\common\Dead Island Epidemic"
+```
+
+After a few seconds, lines like these appear (each starts with the date and time):
+
+```
+INFO request listening on 127.0.0.1:1555
+INFO matchmaking listening on 127.0.0.1:2555
+INFO stats listening on 127.0.0.1:4555
+INFO match listening on 127.0.0.1:3555
+```
+
+The server is now running. **Leave this window open the whole time you play.**
+Minimising it is fine; closing it stops the server.
+
+- If **Windows Firewall** asks about `mono.exe`, you can click **Cancel**. The server only
+  talks to your own PC.
+- **`is not recognized as an internal or external command`:** check the command has no
+  `\` at the very start (`tools\run_server_mono.cmd`, not `\tools\run_server_mono.cmd`),
+  and that the prompt ends with `DIE-Revibed>`. A leading `\` makes Windows look in the
+  root of the drive (`C:\tools`) instead of the DIE-Revibed folder.
+- **`32-bit Mono is needed`:** go back to step 2.
+- **An error mentioning `EpidemicServer.exe`:** the server hasn't been built yet. Do the
+  build in step 4.
+
+### Step 7. Play
+
+1. Make sure Steam is running and logged in.
+2. In your Steam Library, click **Dead Island: Epidemic**, then **Play**.
+3. The game connects to your server and logs you in. The first time, a new account is
+   created for you (saved in `C:\DIE-Revibed\server\bin\account.txt`).
+4. A new account starts with the tutorial, just like the original game.
+
+That's it. You're playing on your own server.
+
+### Every time after that
+
+You don't need to repeat steps 1 to 5. To play again:
+
+1. Open `C:\DIE-Revibed` in File Explorer, click the address bar, type `cmd` and press
+   **Enter**.
+2. Run `tools\run_server_mono.cmd` (with your game path in quotes if it isn't in the
+   default location), and leave the window open.
+3. Launch the game from Steam.
+
+When you're done, close the game, then close the server window.
+
+---
+
+## Playing: vanilla or unlock-all
+
+DIE: Revibed can be played two ways.
+
+### Vanilla (the default)
+
+You start from scratch, as in the original game: tutorial first, then you level up and
+unlock characters, weapons and modes by playing. Heroic Horde stays locked until account
+level 20, as it was.
+
+Some values from the original game were kept only on the official servers and are lost,
+for example reward amounts, drop tables and wave sizes. DIE: Revibed uses reasonable
+stand-ins for these, so progression won't match the original exactly.
+
+### Unlock-all (preservation switches)
+
+Because the game can't be bought or properly progressed anymore, DIE: Revibed has three
+optional switches that let you see everything the game contains. They are stored in your
+account file and can be turned on or off at any time.
+
+| Switch | What it does |
+|---|---|
+| `unlockAll` | Every character (that has a hub model), weapon, gadget, design, part and consumable, and every game mode. |
+| `maxLevel` | Your account level is shown and used as 50, the level where the last item unlocks. |
+| `unlimitedCurrency` | Gold, silver, character points and research points show as 9,999,999. |
+
+Your real progress in the account file is never overwritten. Turning a switch off brings
+you straight back to where you were.
+
+Type these commands in a Command Prompt opened in `C:\DIE-Revibed`, the same way as in
+step 4.
+
+Turn them all on:
+
+```bat
+tools\account_switch.cmd all on
+```
+
+Turn them all off (back to vanilla):
+
+```bat
+tools\account_switch.cmd all off
+```
+
+Or one at a time:
+
+```bat
+tools\account_switch.cmd unlockAll on
+tools\account_switch.cmd maxLevel on
+tools\account_switch.cmd unlimitedCurrency off
+```
+
+Notes:
+
+- The account file only exists after you've started the server and logged in once, so
+  do that before using the switches.
+- Changes take effect the next time the game logs in. Restart the game, or restart the
+  server and log in again.
+- Your infection level (how tough zombies are) follows the strength of the hero and gear
+  you queue with. With high-tier gear from unlock-all, expect much tougher zombies.
+
+---
+
+## What works
+
+| Area | Status |
+|---|---|
+| Login, account, hub (the "Crib") | Works. Account, inventory, currency, characters, equipment, crafting menus and match history. |
+| Loadouts | Saved by the game in your Steam prefs, and kept between sessions. |
+| Tutorial | Playable start to finish. |
+| Practice (starter / scout missions) | Playable, with leveling and rewards. |
+| Horde (Normal and Heroic) | Playable: supply points, waves, hoarder, boss stage, medals and rewards. Wave contents are stand-ins. |
+| Scavenger | Playable against **11 bots** on 3 teams: barricade race, supply points (capture with X, deny with X), looters, hoarders, truck delivery, night phase, win and rewards. Maps: Resort, Jungle and Expedition. |
+| In-match leveling and ability upgrades | Work. |
+| Infection level (zombie scaling) | Follows your hero's strength, as in the later patches. |
+| Hero minions (for example the player hero's summoned minion) | Follow you and fight, using a stand-in AI. |
+| Multiplayer / LAN | **Not yet.** See [Roadmap](#roadmap). |
+| Crossroads, Raid and other modes | Not yet. |
+
+### About bots
+
+The original game never had bots. Scavenger was 12 real players. To make it playable
+solo, DIE: Revibed adds 11 bot heroes, written from scratch. They break barricades,
+capture and deny supply points, fight zombies and enemy heroes, and deliver supplies.
+They are decent, not brilliant.
+
+### Deliberate changes from the original
+
+DIE: Revibed tries to behave like the original game. Where something had to be invented,
+or a change was made on purpose, it's recorded in `docs/devlog.md` and `docs/game-modes.md`, and marked "stand-in"
+or "ours" in the code. The notable ones:
+
+- Bots in Scavenger, as described above.
+- Rewards, wave sizes, capture speeds and income amounts are stand-ins, because the
+  original server-side tables are lost.
+- The unlock-all switches.
+
+---
+
+## Stopping and undoing everything
+
+- **Stop the server:** close its window, or press `Ctrl+C` in it.
+- **Restore the game's original server settings:**
+
+  ```bat
+  powershell -ExecutionPolicy Bypass -File tools\point-client-at-local.ps1 -Restore
+  ```
+
+- **Start over with a fresh account:** stop the server and delete
+  `server\bin\account.txt`.
+- **Remove DIE: Revibed completely:** restore `ip.cfg` as above, then delete the
+  DIE-Revibed folder.
+
+---
+
+## Troubleshooting
+
+| Problem | What to try |
+|---|---|
+| `32-bit Mono is needed` when starting the server | Install the **x86** Mono build (step 2). The 64-bit build lives in `C:\Program Files\Mono` and won't work. |
+| The game says it can't connect | Is the server window open and showing `listening`? Did step 5 run successfully? (Check that `ip.cfg` contains `127.0.0.1`.) Did a Steam file check restore `ip.cfg`? |
+| The game won't start at all | Start it from Steam, with Steam logged in to the account that owns the game. |
+| Something goes wrong in a match | Look at the newest file in `logs\`. It records what the server did, and is the most useful thing to attach to an issue. |
+| Clicking **Horde** on the Play screen shows "Starter Missions" | That's the original game's menu. Double-click the Horde tile to open Horde mission select. |
+| Loadouts reset to the paddle and pipe | Happens once, on an account's very first login (the original game's behaviour). Re-equip and they'll stay. |
+| Unlock-all didn't do anything | Log in again after switching. The server reads the switches at login. |
+| The server stops at start-up with "doesn't match DIE: Revibed's role table" | Your copy of the game isn't the final Steam build (0.8.5.38860), or some of its files are damaged. In Steam, right-click the game, then **Properties > Installed Files > Verify integrity of game files**, then run step 5 again (verifying restores the original `ip.cfg`). |
+| Ports already in use | The server uses TCP ports 1555, 2555, 3555 and 4555 on 127.0.0.1. Close anything else that uses them. |
+
+---
+
+## Known limitations
+
+- Single player only (with bots in Scavenger). See the [Roadmap](#roadmap).
+- Many server-side numbers from the original are lost and replaced by stand-ins.
+- Bots sometimes get stuck on scenery and are moved ("unstuck") after a few seconds, so
+  you may see one blink to a new spot.
+- In Horde on Outpost, the drainage pit at the end is a one-way drop. Zombies that can't
+  reach you there are moved next to you.
+- The game client prints harmless errors in its own log (for example about
+  announcements). These come from the original client.
+- Tested on one Windows 10 PC with one copy of the game, version 0.8.5.38860.
+
+### Known issues
+
+Not fixed yet. Each one is tracked as a GitHub issue.
+
+- The tutorial always puts you in the same character, whichever one you chose ([#1](https://github.com/ITSTDMCC/DIE-Revibed/issues/1)).
+- Infected levels are a bit overtuned: zombies are tougher than they should be ([#2](https://github.com/ITSTDMCC/DIE-Revibed/issues/2)).
+- When you join a match, the game usually shows an error about problems connecting
+  to the server. Keep trying and you'll get into the match ([#3](https://github.com/ITSTDMCC/DIE-Revibed/issues/3)).
+- Special zombies (Puller, Floater, Ram and the others) never use their special attacks.
+  They only walk towards you; for example, the Puller never throws its hook ([#4](https://github.com/ITSTDMCC/DIE-Revibed/issues/4)).
+- Special zombies can be stun-locked: every basic attack from the player, melee or
+  ranged, stuns them ([#5](https://github.com/ITSTDMCC/DIE-Revibed/issues/5)).
+- The Hoarder plays no death animation, and its body doesn't disappear straight away
+  when it dies ([#6](https://github.com/ITSTDMCC/DIE-Revibed/issues/6)).
+- Horde on Outpost can soft-lock. The match ends when you defeat the elite that appears
+  after you defend the second flag. If you've already jumped into the drainage pit with
+  the gas cans, the elite can't reach you and the match can't finish. In the original
+  game the elite probably spawned in that pit. Until this is fixed, stay out of the pit
+  until the elite is dead ([#7](https://github.com/ITSTDMCC/DIE-Revibed/issues/7)).
+
+How each mode works is in `docs/game-modes.md`, and how each problem was found and fixed is in `docs/devlog.md`.
+
+---
+
+## How it works
+
+The original game used two programs: a hub ("Crib") and a match client. They talked to
+several online services: request, matchmaking, stats and match servers. DIE: Revibed
+replaces those services:
+
+- **Request server** (port 1555): login, account, inventory, shop and crafting data,
+  rewards.
+- **Matchmaking server** (port 2555): queues you for a match and hands the hub the match
+  server's address.
+- **Stats server** (port 4555): accepts and logs what the client sends.
+- **Match server** (port 3555): runs the match. It loads the game's own gameplay logic
+  from **your installed copy** at run time, under Mono, so zombies, abilities and physics
+  behave exactly as the original code says. The parts the original server did itself
+  (match flow, waves, capture rules, bots and so on) are written from scratch.
+
+The protocol and data formats were worked out by studying how the client behaves, and
+are documented in our own words in `docs/`. No code from the game is included in this
+repository.
+
+Since v0.2 the repository doesn't contain the game's internal names either. The game's
+code uses scrambled names for most of its classes and fields. The server refers to them
+by our own descriptive names ("roles"), for example `Zombie.Walker` or
+`HordeState.WaveIndex`. Each role is stored with a fingerprint of the shape of the code
+it stands for: its kind, how many fields and methods it has, and their types. When the
+server starts, it fingerprints the game files on your PC and matches the two, so the real
+names only ever exist in memory on your machine. If a role can't be found, the server
+says so and stops instead of guessing.
+
+---
+
+## Repository layout
+
+```
+server/            the server emulator (C#)
+  build.cmd        builds server\bin\EpidemicServer.exe on Windows
+  build.sh         builds with Mono on Linux or macOS (development only)
+  src/             source: protocol, services, match logic, bots
+  src/Resolve/     finds the game's classes and fields by fingerprint at start-up
+tools/
+  run_server_mono.cmd          starts the server (with match logic)
+  point-client-at-local.ps1    points the game's ip.cfg at your PC (and -Restore)
+  account_switch.cmd           the unlock-all switches
+  *Probe/, run_*_probe.cmd     developer tools that load the game offline to test the server
+  RoleGen/, run_rolegen.cmd    developer tool that rebuilds the role table (see docs/architecture.md)
+tests/             developer checks of our encodings against the game's own serializers
+docs/              architecture, protocol, game modes, patch history, development log
+```
+
+Files created while you play (`server\bin\`, `logs\`, `local\`) are ignored by git.
+
+---
+
+## Roadmap
+
+- **Multiplayer:** _Dead Island: Epidemic_ was a multiplayer game. The next goal is to
+  let several players join the same match: first over LAN, then possibly over the
+  internet.
+- Crossroads and the other modes.
+- Better bots.
+- More of the original values, wherever they can be recovered.
+
+Contributions and bug reports are welcome. Please never include game files in an issue
+or a pull request.
+
+---
+
+## License
+
+DIE: Revibed is free software, released under the **GNU General Public License, version
+2** (see [`LICENSE`](LICENSE)).
+
+This license covers only the code and documents in this repository. _Dead Island:
+Epidemic_ itself, its code, assets and trademarks belong to their respective owners, and
+are not covered by this license or included here.

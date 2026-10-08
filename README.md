@@ -435,6 +435,9 @@ Not fixed yet. Each one is tracked as a GitHub issue.
   the gas cans, the elite can't reach you and the match can't finish. In the original
   game the elite probably spawned in that pit. Until this is fixed, stay out of the pit
   until the elite is dead ([#7](https://github.com/ITSTDMCC/DIE-Revibed/issues/7)).
+- Clicking on Horde then clicking the select option doesn't currently work. As a workaround, either double click on Horde to progress through the menu, or set up a lobby for Scavenger and switch the gamemode.
+
+
 
 How each mode works is in `docs/game-modes.md`, and how each problem was found and fixed is in `docs/devlog.md`.
 

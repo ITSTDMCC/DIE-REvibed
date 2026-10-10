@@ -420,21 +420,21 @@ or "ours" in the code. The notable ones:
 
 Not fixed yet. Each one is tracked as a GitHub issue.
 
-- The tutorial always puts you in the same character, whichever one you chose ([#1](https://github.com/ITSTDMCC/DIE-Revibed/issues/1)).
-- Infected levels are a bit overtuned: zombies are tougher than they should be ([#2](https://github.com/ITSTDMCC/DIE-Revibed/issues/2)).
+- The tutorial always puts you in the same character, whichever one you chose ([#1](../../issues/1)).
+- Infected levels are a bit overtuned: zombies are tougher than they should be ([#2](../../issues/2)).
 - When you join a match, the game usually shows an error about problems connecting
-  to the server. Keep trying and you'll get into the match ([#3](https://github.com/ITSTDMCC/DIE-Revibed/issues/3)).
+  to the server. Keep trying and you'll get into the match ([#3](../../issues/3)).
 - Special zombies (Puller, Floater, Ram and the others) never use their special attacks.
-  They only walk towards you; for example, the Puller never throws its hook ([#4](https://github.com/ITSTDMCC/DIE-Revibed/issues/4)).
+  They only walk towards you; for example, the Puller never throws its hook ([#4](../../issues/4)).
 - Special zombies can be stun-locked: every basic attack from the player, melee or
-  ranged, stuns them ([#5](https://github.com/ITSTDMCC/DIE-Revibed/issues/5)).
+  ranged, stuns them ([#5](../../issues/5)).
 - The Hoarder plays no death animation, and its body doesn't disappear straight away
-  when it dies ([#6](https://github.com/ITSTDMCC/DIE-Revibed/issues/6)).
+  when it dies ([#6](../../issues/6)).
 - Horde on Outpost can soft-lock. The match ends when you defeat the elite that appears
   after you defend the second flag. If you've already jumped into the drainage pit with
   the gas cans, the elite can't reach you and the match can't finish. In the original
   game the elite probably spawned in that pit. Until this is fixed, stay out of the pit
-  until the elite is dead ([#7](https://github.com/ITSTDMCC/DIE-Revibed/issues/7)).
+  until the elite is dead ([#7](../../issues/7)).
 - Clicking on Horde then clicking the select option doesn't currently work. As a workaround, either double click on Horde to progress through the menu, or set up a lobby for Scavenger and switch the gamemode.
 
 

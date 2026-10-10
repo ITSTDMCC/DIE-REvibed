@@ -121,10 +121,10 @@ namespace EpidemicServer.Match
         /// strength (GameRuntime.InfectionLevelFor; owner's choice 2026-10-07, matching the live game after v0.6).
         /// </summary>
         /// <summary>
-        /// Share of the strength-based infection level a match actually uses (owner's choice 2026-10-10, 0.6 then 0.4 for walkers near 45 HP: the full
+        /// Share of the strength-based infection level a match actually uses (owner's choice 2026-10-10, 0.6, then 0.4, then 0.3 so a paddle kills a walker in 4 swings: the full
         /// level made zombies too tough, issue #2). Ours; the original server's rule is lost.
         /// </summary>
-        public const double InfectionRamp = 0.4;
+        public const double InfectionRamp = 0.3;
 
         private void ChooseCharacterAndInfection(bool tutorial)
         {

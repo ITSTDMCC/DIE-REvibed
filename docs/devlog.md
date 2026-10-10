@@ -18,7 +18,7 @@ The terms used below:
   game's world manager or a stat type.
 - **Name roles.** Each readable name the server needs is now a role, stored with a salted
   one-way hash of the name. At start-up the server hashes every readable name in the
-  installed game and matches them. The role table holds 584 roles; every one resolves
+  installed game and matches them. The role table holds 589 roles; every one resolves
   against 0.8.5.38860.
 - **Our own names.** About 160 of our own identifiers had copied the game's names, mostly
   protocol message and field names. They now use our own words. Role names were checked

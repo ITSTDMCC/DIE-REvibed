@@ -57,6 +57,47 @@ public static class HordeProbe
             object info = game.BuildClientInfoData(-67.175f, -67.175f, "Player", R.Name("Team.One"), level, melee, ranged);
             object player = game.PrepareLocalPlayer(sp, info, 0, 1, R.Name("Team.One"), level);
             Console.WriteLine("Map " + game.MapName + ", spawn " + sp + ", level " + level + ", synchronizables " + game.SyncCount);
+            if (args.Length > 2 && args[2] == "specials")
+            {
+                // Issue #4/#5 check: each special type 90 units from the player for 15 s (no director); logs the AI's
+                // first use of each special move, its basic attacks, and the stagger guard.
+                ServerHooks.Log = line => { if (line.StartsWith("AI: ") || line.StartsWith("stagger guard") || line.Contains("failed")) Console.WriteLine("     [hook] " + line); };
+                MethodInfo upd = game.WorldType.GetMethod("Update", all, null, new[] { typeof(float), typeof(float), typeof(int) }, null);
+                float tt = 0f; int fr = 0;
+                foreach (string role in new[] { "Zombie.Butcher", "Zombie.Floater", "Zombie.Puller", "Zombie.Ram", "Zombie.Siren", "Zombie.FloaterCarrier", "Zombie.ButcherElite" })
+                {
+                    object z;
+                    try { z = game.SpawnNpc(R.Name(role), sp.X + (Environment.GetEnvironmentVariable("SWING") != null ? 12f : 90f), sp.Y, GameRuntime.ZombieTeam, null); }
+                    catch (Exception e) { Console.WriteLine(role + ": not in this map's pool (" + GameRuntime.Unwrap(e).Message + ")"); continue; }
+                    Console.WriteLine(role + " spawned " + (Environment.GetEnvironmentVariable("SWING") != null ? "12" : "90") + " units away");
+                    for (int k = 0; k < 15 * 30; k++)
+                    {
+                        fr++; tt += 1f / 30f;
+                        game.SetStat(player, R.Name("Stat.Health"), ServerHooks.GetStat(player, R.Name("Stat.HealthMax")));
+                        if (Environment.GetEnvironmentVariable("SWING") != null)
+                        {
+                            // The player swings the paddle at the zombie (slot 0 pressed every other frame).
+                            float[] pz = ServerHooks.Position(z), pp = ServerHooks.Position(player);
+                            float ddx = pz[0] - pp[0], ddy = pz[1] - pp[1], dd = Math.Max(0.001f, (float)Math.Sqrt(ddx * ddx + ddy * ddy));
+                            game.SetAim(player, ddx / dd, ddy / dd);
+                            object pbar = player.GetType().GetProperty(R.Name("Fighter.Bar"), all).GetValue(player, null);
+                            pbar.GetType().GetMethod(R.Name("Fighter.Press"), all).Invoke(pbar, new object[] { 0, k % 2 == 0 });
+                            ServerHooks.Passive.Add(z);
+                        }
+                        upd.Invoke(game.World, new object[] { 1f / 30f, tt, fr });
+                        if (k % 15 == 0 && Environment.GetEnvironmentVariable("TRACE") != null)
+                            Console.WriteLine("     t=" + (k / 30f).ToString("0.0") + " zombie " + string.Join(",", ServerHooks.Position(z).Select(v => v.ToString("0")).ToArray()) + " aim " +
+                                              string.Join(",", ServerHooks.Vector(z.GetType().GetProperty(R.Name("Fighter.Aim"), all).GetValue(z, null)).Select(v => v.ToString("0.00")).ToArray()));
+                    }
+                    Console.WriteLine("   staggers on specials so far: allowed " + ServerHooks.StaggersAllowed + ", dropped " + ServerHooks.StaggersDropped + "; zombie Health " + ServerHooks.GetStat(z, R.Name("Stat.Health")));
+                    Console.WriteLine("   after 15 s: zombie at " + string.Join(",", ServerHooks.Position(z).Select(v => v.ToString("0")).ToArray()) + ", player at " +
+                                      string.Join(",", ServerHooks.Position(player).Select(v => v.ToString("0")).ToArray()) + ", player active " + player.GetType().GetProperty("IsActive", all).GetValue(player, null) +
+                                      ", zombie active " + z.GetType().GetProperty("IsActive", all).GetValue(z, null));
+                    if (!BotDriver.Gone(z)) game.SetStat(z, R.Name("Stat.Health"), 0f);
+                    for (int k = 0; k < 60; k++) { fr++; tt += 1f / 30f; upd.Invoke(game.World, new object[] { 1f / 30f, tt, fr }); }
+                }
+                return 0;
+            }
             var dir = new HordeDirector(game, player, line => Console.WriteLine("     " + line));
             dir.PopulateWorld();
             ServerHooks.AfterUpdate = dir.Tick;

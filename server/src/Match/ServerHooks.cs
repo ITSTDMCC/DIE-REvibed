@@ -93,6 +93,10 @@ namespace EpidemicServer.Match
             OnKill = null;
             OnGameMessage = null;
             StrikeAbility.Clear();
+            SpecialMoves.Clear();
+            LastSpecial.Clear();
+            SpecialBusyUntil.Clear();
+            StaggeredAt.Clear();
             AggroRange.Clear();
             WakeUntil.Clear();
             NavNext.Clear();
@@ -217,6 +221,13 @@ namespace EpidemicServer.Match
             a[3] = change;
             if (TraceControl) Log("trace stat effect " + type + " changer " + Describe(changer) + " on " + Describe(entity));
             if (ControlEffects.Contains(type.ToString()) && Blocked(changer, entity, "stat effect " + type)) return null;
+            string t = type.ToString();
+            if ((t == R.Name("Effect.KnockStun") || t == R.Name("Effect.LightKnockStun")) && GuardStagger(entity))
+            {
+                if (_blockedLogged.Add("stagger guard " + entity.GetType().Name))
+                    Log("stagger guard: " + Describe(entity) + " was staggered less than " + SpecialStaggerImmunity + " s ago; this basic-attack stagger is dropped (logged once per kind)");
+                return null;
+            }
             object container = Field(entity, R.Name("Entity.Effects"));
             object[] call = { change };
             Method(container, R.Name("Effects.Add")).Invoke(container, call);
@@ -233,7 +244,8 @@ namespace EpidemicServer.Match
                 return Enum.ToObject(R.Type("BuffResult"), 0);
             }
             if (TraceControl) Log("trace buff " + Describe(buff) + " owner " + Describe(owner) + " target " + Describe(target) + " ability " + AbilityName(buff) + " / owner's " + AbilityName(owner) + " via " + GameFrames());
-            if (BlockControl != null && owner != null && BlockControl(RootOwner(owner), target))
+            bool stagger = buff.GetType().Name == R.Short("Buff.Stagger");
+            if ((BlockControl != null && owner != null && BlockControl(RootOwner(owner), target)) || (stagger && GuardStagger(target)))
             {
                 // The melee knockback-stun buff (role Effect.KnockStun): Effect.LightKnockStun stat effect, knockback
                 // vector and the stagger animation, synced to the client. Drop it whole (the hit's
@@ -682,6 +694,10 @@ namespace EpidemicServer.Match
             NavLastPos.Remove(npc);
             NavShortUntil.Remove(npc);
             LastAttack.Remove(npc);
+            SpecialMoves.Remove(npc);
+            LastSpecial.Remove(npc);
+            SpecialBusyUntil.Remove(npc);
+            StaggeredAt.Remove(npc);
             AggroRange.Remove(npc);
             StrikeRange.Remove(npc);
             StrikeInterval.Remove(npc);
@@ -817,10 +833,14 @@ namespace EpidemicServer.Match
                 if (!AggroRange.TryGetValue(npc, out aggro)) aggro = DefaultAggroRange;
                 if (dist > aggro) continue;
                 if (!WakeUp(npc)) continue;
+                // While a special move plays out (a charge, the hook, a spit) the game moves and turns the NPC itself.
+                float busy;
+                if (SpecialBusyUntil.TryGetValue(npc, out busy) && _time < busy) continue;
                 if (!HoldPosition.Contains(npc)) Steer(npc, target);
                 // Turn toward the player; the character update eases Fighter.Aim toward this.
                 object dir = _g.Vector2(dx / Math.Max(dist, 0.001f), dy / Math.Max(dist, 0.001f));
                 SetField(npc, R.Name("Fighter.AimGoal"), dir);
+                if (TrySpecialMove(npc, target, dir, dist)) continue;
                 float last;
                 float reach;
                 if (!StrikeRange.TryGetValue(npc, out reach)) reach = AttackRange;
@@ -836,6 +856,116 @@ namespace EpidemicServer.Match
                 bool attacked = (bool)npc.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(npc, new[] { dir, ability });
                 Log("AI: " + Describe(npc) + " attacks " + Describe(target) + " at " + dist.ToString("0") + " units with " + ability + (attacked ? "" : " (refused)"));
             }
+        }
+
+        // ---- special zombies' own moves (issue #4) and their stagger guard (issue #5) ----
+
+        /// <summary>
+        /// The special moves a zombie may use, by role, with the distances (units) it uses them at. The game keeps
+        /// each move's cooldown and "can use" rule; the original server's choice of when to use which is lost, so
+        /// these distances are stand-ins (ours, 2026-10-10). Walkers, looters and veterans only have strike
+        /// variants and keep the basic attack.
+        /// </summary>
+        private static readonly string[][] SpecialMoveTable =
+        {
+            new[] { "Special.BigCharge", "40", "140" },
+            new[] { "Special.CarrierCharge", "40", "140" },
+            new[] { "Special.Ram", "40", "140" },
+            new[] { "Special.FloatDash", "40", "140" },
+            new[] { "Special.Crawl", "40", "140" },
+            new[] { "Ability.PullerGrab", "30", "120" },
+            new[] { "Special.Spit", "30", "160" },
+            new[] { "Special.CarrierSpit", "30", "160" },
+            new[] { "Special.CarrierBomb", "30", "160" },
+            new[] { "Special.BigRavage", "0", "25" },
+            new[] { "Special.Stomp", "0", "25" },
+            new[] { "Special.Fear", "0", "40" },
+            new[] { "Special.Summon", "0", "200" },
+        };
+
+        /// <summary>Seconds between two special moves of one zombie, and how long the AI leaves it alone after one (ours).</summary>
+        public const float SpecialSpacing = 3f, SpecialBusySeconds = 1.5f;
+
+        /// <summary>A special zombie can be staggered by heroes' basic attacks at most once in this many seconds (ours, issue #5).</summary>
+        public const float SpecialStaggerImmunity = 2f;
+
+        /// <summary>Counts for probes: basic-attack staggers on specials let through and dropped by the guard.</summary>
+        public static int StaggersAllowed, StaggersDropped;
+
+        private sealed class SpecialMove { public object Ability, Key; public float Min, Max; }
+        private static readonly Dictionary<object, List<SpecialMove>> SpecialMoves = new Dictionary<object, List<SpecialMove>>();
+        private static readonly Dictionary<object, float> LastSpecial = new Dictionary<object, float>();
+        private static readonly Dictionary<object, float> SpecialBusyUntil = new Dictionary<object, float>();
+        private static readonly Dictionary<object, float> StaggeredAt = new Dictionary<object, float>();
+        private static readonly HashSet<string> _specialLogged = new HashSet<string>();
+
+        /// <summary>The NPC's special moves from its ability bar (cached; empty for walkers and the like).</summary>
+        private static List<SpecialMove> MovesOf(object npc)
+        {
+            List<SpecialMove> moves;
+            if (SpecialMoves.TryGetValue(npc, out moves)) return moves;
+            moves = new List<SpecialMove>();
+            object bar = Prop(npc, R.Name("Fighter.Bar"));
+            Array slots = bar == null ? null : (Array)Prop(bar, R.Name("Bar.Slots"));
+            if (slots != null)
+                foreach (object ability in slots)
+                {
+                    if (ability == null) continue;
+                    object key = Prop(ability, R.Name("Ability.Key"));
+                    foreach (string[] row in SpecialMoveTable)
+                        if (key.ToString() == R.Name(row[0]))
+                            moves.Add(new SpecialMove { Ability = ability, Key = key, Min = float.Parse(row[1]), Max = float.Parse(row[2]) });
+                }
+            SpecialMoves[npc] = moves;
+            return moves;
+        }
+
+        /// <summary>Uses one special move if one is ready and the target is at its distance; true if one started.</summary>
+        private static bool TrySpecialMove(object npc, object target, object dir, float dist)
+        {
+            List<SpecialMove> moves = MovesOf(npc);
+            if (moves.Count == 0) return false;
+            float last;
+            if (LastSpecial.TryGetValue(npc, out last) && _time - last < SpecialSpacing) return false;
+            foreach (SpecialMove m in moves)
+            {
+                if (dist < m.Min || dist > m.Max) continue;
+                MethodInfo ready = m.Ability.GetType().GetMethod(R.Name("Ability.Ready"), All, null, new[] { typeof(bool) }, null);
+                if (ready != null && !(bool)ready.Invoke(m.Ability, new object[] { false })) continue;
+                // Moves go where the NPC faces (a charge launched while it still faced away ran off: specials test,
+                // 2026-10-10), so face the target first.
+                float[] d = Vector(dir);
+                _g.SetAim(npc, d[0], d[1]);
+                bool started = (bool)npc.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), m.Key.GetType() }, null).Invoke(npc, new[] { dir, m.Key });
+                if (!started) continue;
+                LastSpecial[npc] = _time;
+                LastAttack[npc] = _time;
+                SpecialBusyUntil[npc] = _time + SpecialBusySeconds;
+                if (_specialLogged.Add(npc.GetType().Name + " " + m.Key))
+                    Log("AI: " + Describe(npc) + " uses " + m.Key + " on " + Describe(target) + " at " + dist.ToString("0") + " units (first use of this move by this kind)");
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Issue #5: heroes' basic attacks staggered special zombies on every hit, so they could be stun-locked. A special
+        /// (a zombie with special moves) now takes at most one basic-attack stagger every SpecialStaggerImmunity seconds;
+        /// the damage always lands, and abilities meant to stun are not affected. True when this stagger is dropped.
+        /// </summary>
+        private static bool GuardStagger(object target)
+        {
+            if (target == null || !R.Type("Type.Fighter").IsInstanceOfType(target) || MovesOf(target).Count == 0) return false;
+            if (BasicAttackHitOnStack() == null) return false;
+            float last;
+            if (StaggeredAt.TryGetValue(target, out last))
+            {
+                if (_time == last) return false;   // the same hit's buff and stat effect
+                if (_time - last < SpecialStaggerImmunity) { StaggersDropped++; return true; }
+            }
+            StaggeredAt[target] = _time;
+            StaggersAllowed++;
+            return false;
         }
 
         /// <summary>Pets this close to their owner stop following; enemies this close to the pet (or to its owner) are fought.</summary>

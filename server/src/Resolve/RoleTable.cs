@@ -597,6 +597,19 @@ namespace EpidemicServer.Resolve
             { "Ability.HeavySecond", "N|0826331dd7cc9dc0" },
             { "Ability.LightFirst", "N|894415b3409e05ab" },
             { "Ability.GunFirst", "N|733880ce8bec1a4e" },
+            { "Special.BigCharge", "N|7976fd4634f7be85" },
+            { "Special.BigRavage", "N|50c66b23a8a30f41" },
+            { "Special.CarrierCharge", "N|3f190370a9123bb8" },
+            { "Special.FloatDash", "N|dae4cdcd1d527381" },
+            { "Special.Spit", "N|d75af5552393915d" },
+            { "Special.CarrierSpit", "N|f864970f85d0cdd8" },
+            { "Special.CarrierBomb", "N|504490cff6737d72" },
+            { "Special.Crawl", "N|69716b2e82e8ead0" },
+            { "Special.Ram", "N|462875910d1b4c55" },
+            { "Special.Stomp", "N|9355465faef4a366" },
+            { "Special.Summon", "N|ed5d2cffcc5aca0a" },
+            { "Special.Fear", "N|2024a51815f3f9c1" },
+            { "Ability.Ready", "N|2b60d93d801a07f3" },
         };
 
         /// <summary>Roles found only in the hub's library; the match side doesn't check them.</summary>

@@ -480,6 +480,9 @@ namespace EpidemicServer.Match
             float da = Distance(b, a[0], a[1]);
             if (da > CompanionFar) ServerHooks.Steer(Companion, _player);
             else if (da < CompanionNear) ServerHooks.StopSteering(Companion);
+            // Face where she walks, as when she goes for a zombie: following with a stale aim, the client slid her
+            // along without the walk animation (owner, 2026-10-10 playtest).
+            if (da >= CompanionNear && da > 0.001f) _g.SetAim(Companion, (a[0] - b[0]) / da, (a[1] - b[1]) / da);
         }
 
         /// <summary>Companion walks to a live target and swings only when it is within reach, her aim on it.</summary>

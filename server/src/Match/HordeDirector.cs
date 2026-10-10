@@ -91,6 +91,7 @@ namespace EpidemicServer.Match
         private readonly List<Point> _points = new List<Point>();
         private readonly List<float[]> _eventSpots = new List<float[]>();
         private float[] _bossAt;
+        private int _bossEventId = -1;
         private int _bossMinions;
         private float _bossRespawnMin = 3f, _bossRespawnMax = 4f;
         public readonly List<object> Zombies = new List<object>();
@@ -158,11 +159,23 @@ namespace EpidemicServer.Match
                 else if (kind == R.Name("MapKind.Boss"))
                 {
                     _bossAt = p;
+                    _bossEventId = Convert.ToInt32(GameRuntime.MapValue(o, "ID"));
                     // The map's own boss-event values, with its hard-difficulty set for Heroic.
                     _bossMinions = Convert.ToInt32(GameRuntime.MapValue(o, R.Name(Heroic ? "Map.HardMinionCap" : "Map.MinionCap")));
                     _bossRespawnMin = Convert.ToSingle(GameRuntime.MapValue(o, R.Name(Heroic ? "Map.HardRespawnMin" : "Map.RespawnMin")));
                     _bossRespawnMax = Convert.ToSingle(GameRuntime.MapValue(o, R.Name(Heroic ? "Map.HardRespawnMax" : "Map.RespawnMax")));
                 }
+            }
+            // The boss appears at the trigger position that carries its event's ID, as the game places the supply
+            // points (on Outpost that is down in the drainage pit, owner's report 2026-10-10: the elite spawned up
+            // at the boss event's own spot, out of reach of a player already in the pit). Else the event's spot.
+            object bossSpot = _g.MapThings().FirstOrDefault(o => o.GetType().Name == R.Name("MapKind.TriggerSpot") &&
+                                                                Convert.ToInt32(GameRuntime.MapValue(o, "ID")) == _bossEventId && _bossAt != null);
+            if (bossSpot != null)
+            {
+                float[] at = _g.MapPosition(bossSpot);
+                _log("horde: the boss appears at its trigger position " + Fmt(at) + " (ID " + _bossEventId + "), not at the boss event " + Fmt(_bossAt));
+                _bossAt = at;
             }
             _points.Sort((a, b) => a.Id.CompareTo(b.Id));
             for (int i = 0; i < _points.Count; i++) _points[i].Slot = i + 1;

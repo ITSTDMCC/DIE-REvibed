@@ -586,7 +586,7 @@ namespace EpidemicServer.Match
                     _lastPressCount = count;
                     try
                     {
-                        object player = _g.GetPlayer(0);
+                        object player = (_g.Human ?? _g.GetPlayer(0));
                         object bar = Prop(player, R.Name("Fighter.Bar"));
                         object ability = bar.GetType().GetMethods(All).First(m => m.Name == R.Name("Bar.Cached") && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int)).Invoke(bar, new object[] { index });
                         if (ability == null || !new[] { R.Name("Ability.HeavyFirst"), R.Name("Ability.HeavySecond"), R.Name("Ability.LightFirst"), R.Name("Ability.GunFirst"), "Dash" }.Contains(Prop(ability, R.Name("Ability.Key")).ToString()))
@@ -810,7 +810,7 @@ namespace EpidemicServer.Match
 
         private static void RunAi(object gm)
         {
-            object player = _g.GetPlayer(0);
+            object player = (_g.Human ?? _g.GetPlayer(0));
             if (player == null) return;
             // With a ChooseTarget (Scavenger: the nearest living hero), zombies keep fighting the bots while the
             // human is dead; without one they only ever chase the human.

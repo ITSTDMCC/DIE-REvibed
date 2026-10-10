@@ -337,6 +337,13 @@ namespace EpidemicServer.Match
                 ?? SpawnPoints.FirstOrDefault(s => s.Kind == R.Name("MapKind.Checkpoint") && s.IsStart);
         }
 
+        /// <summary>
+        /// The human's hero (client 0). The game makes one player per cached hero and the human's is not always
+        /// index 0 (any hero but the default one), so code must not assume GetPlayer(0) (2026-10-10 playtest:
+        /// zombies ignored a non-default hero).
+        /// </summary>
+        public object Human;
+
         public object GetPlayer(int index) { return WorldType.GetMethod(R.Name("World.HeroAt"), All).Invoke(World, new object[] { index }); }
 
         public object GetClient(int index)
@@ -796,7 +803,7 @@ namespace EpidemicServer.Match
             // adds its local player there in World.Created, which ran before the player was set.
             IList connected = (IList)WorldType.GetProperty(R.Name("Network.Heroes"), All).GetValue(World, null);
             if (!connected.Contains(player)) connected.Add(player);
-            if (clientIndex == 0) ServerHooks.Client0 = client;
+            if (clientIndex == 0) { ServerHooks.Client0 = client; Human = player; }
 
             Type pt = player.GetType();
             if (bot) pt.GetField(R.Name("Hero.Bot"), All).SetValue(player, true);

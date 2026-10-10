@@ -9,14 +9,14 @@ namespace EpidemicServer.Protocol
     {
         public byte[] Guid = new byte[16];
         public ushort SchematicId;
-        public bool IsInInventory = true;
+        public bool InBag = true;
         public int Durability = FullDurability;
         public int Ep;
 
         public const int FullDurability = 100;
     }
 
-    /// <summary>A stack of an item (ConductorCrafting.Stackable): id, StackableType, amount.</summary>
+    /// <summary>A stack of an item (crafting.Stackable): id, stackable type, amount.</summary>
     public sealed class OwnedStackable
     {
         public ushort Id;
@@ -63,14 +63,14 @@ namespace EpidemicServer.Protocol
             w.WriteBytes(u.Guid);
             w.WriteUInt16(u.SchematicId);
             w.WriteVarUInt64(userId);
-            w.WriteBool(u.IsInInventory);
+            w.WriteBool(u.InBag);
             w.WriteVarInt32(u.Durability);
             w.WriteVarInt32(u.Ep);
             w.WriteVarUInt32(0);  // no slots
         }
 
         /// <summary>
-        /// One stackable as MessageSerialization.Serialize(ref Stackable) writes it (checked against
+        /// One stackable as Serializer.Serialize(ref Stackable) writes it (checked against
         /// the game: id 1256, type 6, user 1, amount 3 is E8-04-06-01-03-00): ushort id, varint
         /// type, varint user id, ushort amount.
         /// </summary>
@@ -97,7 +97,7 @@ namespace EpidemicServer.Protocol
         }
 
         /// <summary>
-        /// Gadgets as MessageSerialization.Serialize(ref Gadget) writes them (checked against the game: GUID 01..10,
+        /// Gadgets as Serializer.Serialize(ref Gadget) writes them (checked against the game: GUID 01..10,
         /// id 0x1234, user 1, in inventory, stats 09 08 gives 10-01..10-34-12-01-01-02-09-08): bytes GUID, ushort id,
         /// varint user id, bool in inventory, bytes stats.
         /// </summary>
@@ -109,7 +109,7 @@ namespace EpidemicServer.Protocol
                 w.WriteBytes(g.Guid);
                 w.WriteUInt16(g.GadgetId);
                 w.WriteVarUInt64(a.UserId);
-                w.WriteBool(g.IsInInventory);
+                w.WriteBool(g.InBag);
                 w.WriteBytes(g.Stats);
             }
         }

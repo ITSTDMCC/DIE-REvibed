@@ -12,22 +12,22 @@ namespace EpidemicServer.Match
     /// the human plus 3 bot teammates on Team1, 4 bots on Team2 and on Team3 (owner, 2026-10-07: bots from the
     /// start). docs/game-modes.md describes the mode; the client only reacts to state, so every decision
     /// is ours (values marked "stand-in" have no source):
-    /// - Team phase and barricade race: per team ScavengerState.Teams[TeamToIndex] (ScavengerTeam.Phase phase 0/1/2, ScavengerTeam.Barricade1/ScavengerTeam.Barricade2 barricade
+    /// - Team phase and barricade race: per team ScavengerState.Teams[team to index] (ScavengerTeam.Phase phase 0/1/2, ScavengerTeam.Barricade1/ScavengerTeam.Barricade2 barricade
     ///   states 0 none, 1 active, 2 destroyed, ScavengerTeam.BarricadeHealth current barricade health 0..100). A team's barricades are its
-    ///   wooden Spawn_Destructible groups (Team field), nearest its start first.
-    /// - Storage rooms (supply points): one StorageRoom entity per Event_StorageRoom, list entries ScavengerState.RoomProgress progress,
-    ///   ScavengerState.RoomSpeed speed x100, ScavengerState.RoomBonus bonus, ScavengerState.RoomOwner owner, ScavengerState.RoomCapturer capturing team, in StorageRoomPoint order.
+    ///   wooden MapKind.Breakable groups (Team field), nearest its start first.
+    /// - Storage rooms (supply points): one RoomEntity entity per MapKind.RoomEvent, list entries ScavengerState.RoomProgress progress,
+    ///   ScavengerState.RoomSpeed speed x100, ScavengerState.RoomBonus bonus, ScavengerState.RoomOwner owner, ScavengerState.RoomCapturer capturing team, in MapKind.RoomPoint order.
     /// - Supplies: the game's own Supplies (register, drops on kills Supplies.DropFromKill, carry, deliver at the truck with slot 17,
     ///   steal with slot 28, drop on death Supplies.DropOnDeath); income for owned rooms via Supplies.AddDelivered.
-    /// - Hoarders and dynamic events in ScavengerState.Events (type 1 hoarder); end game ScavengerState.Night, leader ScavengerState.Leader, GameOver ScavengerState.GameOver.
-    /// - The end: TeamFinished per team, ScavengerMedalInformation (26), Rewards (5).
+    /// - Hoarders and dynamic events in ScavengerState.Events (type 1 hoarder); end game ScavengerState.Night, leader ScavengerState.Leader, game over game over.
+    /// - The end: team finished per team, scavenger medal information (26), Rewards (5).
     /// </summary>
     public sealed class ScavengerDirector
     {
         private const BindingFlags All = GameRuntime.All;
         public const int TeamFinishedMessage = 4, MedalMessage = 26;
         public const int DeliverSlot = 17, StealSlot = 28;
-        /// <summary>DropTableBoxID: Scavenger boxes.</summary>
+        /// <summary>drop table box ID: Scavenger boxes.</summary>
         public const int MissionBox = 1, TimeBox = 6, VictoryBox = 11, FirstBarricadeBox = 12, FirstEndGameBox = 13;
 
         // ---- stand-ins (no source) ----
@@ -36,12 +36,12 @@ namespace EpidemicServer.Match
         /// <summary>Bots stand this far in front of a barricade's middle to break it (ours).</summary>
         public const float BarricadeStandOff = 26f;
         /// <summary>A room captures in CaptureSeconds with one capturing hero present (x2 with two, ...); contested it pauses.</summary>
-        public const float CaptureSeconds = 10f, CaptureRange = 30f;
+        public const float CaptureSeconds = 10f, CaptureReach = 30f;
         /// <summary>Income: every IncomeSeconds, IncomePerRoom delivered for each owned room (tuned offline toward a 20-30 minute match).</summary>
         public const float IncomeSeconds = 60f;
         public const int IncomePerRoom = 25;
         /// <summary>First hoarder after this long, then one every HoarderEvery.</summary>
-        public const float FirstHoarder = 240f, HoarderEvery = 240f;
+        public const float FirstCarrier = 240f, HoarderEvery = 240f;
         /// <summary>Looters near storage rooms, at most this many alive, one every LooterEvery.</summary>
         public const int MaxLooters = 6;
         public const float LooterEvery = 12f;
@@ -53,7 +53,7 @@ namespace EpidemicServer.Match
         public const int AmbientZombies = 70;
         public const float GiveUpSeconds = 4f, IgnoreSeconds = 20f;
         public static string LooterType { get { return R.Name("Zombie.Looter"); } }
-        public static readonly string[] HoarderTypes = { R.Name("Zombie.ButcherHoarder"), R.Name("Zombie.PullerHoarder"), R.Name("Zombie.FloaterHoarder") };
+        public static readonly string[] HoarderTypes = { R.Name("Zombie.ButcherCarrier"), R.Name("Zombie.PullerCarrier"), R.Name("Zombie.FloaterCarrier") };
 
         private sealed class TeamInfo
         {
@@ -95,10 +95,10 @@ namespace EpidemicServer.Match
         private readonly List<object> _looters = new List<object>();
         private object _hoarder;
         private int _hoarderEventId;
-        private float _time, _nextIncome = IncomeSeconds, _nextHoarder = FirstHoarder, _nextLooter = 10f, _leaderSince = -1f;
+        private float _time, _nextIncome = IncomeSeconds, _nextHoarder = FirstCarrier, _nextLooter = 10f, _leaderSince = -1f;
         private bool _started, _ended, _night;
         private object _barricadeRaceTeam, _fillTruckTeam, _winner;
-        public int Target, TruckFull;
+        public int Target, TruckLoaded;
         public Action<int, int[]> OnFinished;   // placement of the human's team, boxes
 
         public ScavengerDirector(GameRuntime g, object human, Action<string> log)
@@ -106,51 +106,51 @@ namespace EpidemicServer.Match
             _g = g;
             _human = human;
             _log = log;
-            _mode = g.GameMode;
+            _mode = g.ActiveMode;
             _state = _mode.GetType().GetField(R.Name("ScavengerMode.State"), All);
             Target = (int)_mode.GetType().GetField(R.Name("ScavengerMode.WinTarget"), All).GetValue(_mode);
-            TruckFull = (int)_mode.GetType().GetField(R.Name("ScavengerMode.TruckFull"), All).GetValue(_mode);
+            TruckLoaded = (int)_mode.GetType().GetField(R.Name("ScavengerMode.TruckLoaded"), All).GetValue(_mode);
         }
 
         // ---- set-up ----
 
         public void PopulateWorld(IList<string> botHeroes, int level, Weapon melee, Weapon ranged)
         {
-            Type teamType = _human.GetType().GetProperty("TeamId", All).PropertyType;
-            foreach (string name in new[] { "Team1", "Team2", "Team3" })
+            Type teamType = _human.GetType().GetProperty(R.Name("Entity.Team"), All).PropertyType;
+            foreach (string name in new[] { R.Name("Team.One"), R.Name("Team.Two"), R.Name("Team.Three") })
             {
                 object id = Enum.Parse(teamType, name);
-                // GameMode.TeamToIndex: team - 1.
+                // team to index: team - 1.
                 _teams.Add(new TeamInfo { Name = name, Id = id, Index = Convert.ToInt32(id) - 1 });
             }
             var groups = new Dictionary<int, List<object>>();
             var groupDir = new Dictionary<int, float[]>();
             var groupTeam = new Dictionary<int, string>();
-            foreach (object o in _g.MapObjects())
+            foreach (object o in _g.MapThings())
             {
                 string kind = o.GetType().Name;
                 float[] p = _g.MapPosition(o), d = _g.MapDirection(o);
-                object teamField = GameRuntime.MapValue(o, "Team");
+                object teamField = GameRuntime.MapValue(o, R.Name("Record.Team"));
                 TeamInfo team = teamField == null ? null : _teams.FirstOrDefault(t => t.Name == teamField.ToString());
-                if (kind == "PlayerSpawnPoint" && team != null)
+                if (kind == R.Name("MapKind.HeroStart") && team != null)
                 {
-                    var sp = new SpawnPoint { Kind = kind, Team = team.Name, IsStart = (bool)GameRuntime.MapValue(o, "IsStart"), X = p[0], Y = p[1] };
+                    var sp = new SpawnPoint { Kind = kind, Team = team.Name, IsStart = (bool)GameRuntime.MapValue(o, R.Name("Msg.Starting")), X = p[0], Y = p[1] };
                     if (sp.IsStart) team.Start = sp; else team.Supply = sp;
                 }
-                else if (kind == "TruckerSpawnPoint" && team != null) team.Truck = p;
-                else if (kind == "Spawn_Destructible" && team != null && GameRuntime.MapValue(o, "BarricadeType").ToString() == "WoodenBarricade" &&
-                         !(bool)GameRuntime.MapValue(o, "DynamiclySpawned"))
+                else if (kind == R.Name("MapKind.DriverStart") && team != null) team.Truck = p;
+                else if (kind == R.Name("MapKind.Breakable") && team != null && GameRuntime.MapValue(o, R.Name("Map.BarricadeKind")).ToString() == R.Name("BarricadeKind.Wood") &&
+                         !(bool)GameRuntime.MapValue(o, R.Name("Map.Dynamic")))
                 {
-                    int group = Convert.ToInt32(GameRuntime.MapValue(o, "GroupID"));
+                    int group = Convert.ToInt32(GameRuntime.MapValue(o, R.Name("Map.Group")));
                     if (!groups.ContainsKey(group)) groups[group] = new List<object>();
                     groups[group].Add(SpawnBarricade(o, p, d));
                     groupDir[group] = d;
                     groupTeam[group] = team.Name;
                 }
-                else if (kind == "Event_StorageRoom")
+                else if (kind == R.Name("MapKind.RoomEvent"))
                     _rooms.Add(new Room { Id = Convert.ToUInt16(GameRuntime.MapValue(o, "ID")), At = p, Name = GameRuntime.MapValue(o, "Name").ToString().Replace("PCStrings.GUI.Storage.", "") });
-                else if (kind == "Event_DynamicEvent" && (bool)GameRuntime.MapValue(o, "AllowHoardeSpawn")) _hoarderSpots.Add(p);
-                else if (kind == "Spawn_EventEntities" || kind == "Spawn_Static") _spots.Add(new[] { p[0], p[1], d[0], d[1] });
+                else if (kind == R.Name("MapKind.Dynamic") && (bool)GameRuntime.MapValue(o, R.Name("Map.WaveAllowed"))) _hoarderSpots.Add(p);
+                else if (kind == R.Name("MapKind.EventSpawns") || kind == R.Name("MapKind.StaticSpawn")) _spots.Add(new[] { p[0], p[1], d[0], d[1] });
             }
             Type groupType = R.Type("BarricadeGroup");
             foreach (var kv in groups)
@@ -176,9 +176,9 @@ namespace EpidemicServer.Match
                     t.Approach.Clear(); t.Approach.AddRange(ap);
                 }
 
-            // Storage rooms in the game mode's StorageRoomPoint order, which the synced lists follow.
-            Type roomType = _g.Game("ConductorGameLogic.Entities.GameModeObjects.StorageRoom");
-            var points = ((IEnumerable)_mode.GetType().GetProperty("StaticMapObjects", All).GetValue(_mode, null)).Cast<object>().Where(o => o.GetType().Name == "StorageRoomPoint").ToList();
+            // Storage rooms in the game mode's MapKind.RoomPoint order, which the synced lists follow.
+            Type roomType = R.Type("Type.Room");
+            var points = ((IEnumerable)_mode.GetType().GetProperty(R.Name("Map.Objects"), All).GetValue(_mode, null)).Cast<object>().Where(o => o.GetType().Name == R.Name("MapKind.RoomPoint")).ToList();
             var ordered = new List<Room>();
             foreach (object pt in points)
             {
@@ -191,15 +191,15 @@ namespace EpidemicServer.Match
             {
                 object room = _g.TakeFromPool(roomType);
                 roomType.GetField("ID", All).SetValue(room, r.Id);
-                _g.GameManagerType.GetMethod("SpawnGameObject", All).Invoke(_g.GameManager, new object[] { room, null, null });
-                if (roomType.GetField("StorageRoomPoint", All).GetValue(room) == null) roomType.GetMethod(R.Name("StorageRoom.Link"), All).Invoke(room, null);
+                _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { room, null, null });
+                if (roomType.GetField(R.Name("MapKind.RoomPoint"), All).GetValue(room) == null) roomType.GetMethod(R.Name("Room.Link"), All).Invoke(room, null);
                 r.Entity = room;
                 r.Owner = r.Capturing = Neutral();
                 // The room's entry in the synced lists (ScavengerState.RoomProgress..ScavengerState.RoomCapturer). The client's minimap marker and the in-world
-                // capture ring read the lists at this index (GUI_MapMarker.Update, StorageRoomHUD.Update); only the
+                // capture ring read the lists at this index (GUI-map-marker.Update, storage-room-HUD.Update); only the
                 // original server set it, so every room showed entry 0's state (owner, 2026-10-07: capturing one
                 // point lit up all of them).
-                room.GetType().GetProperty("IndexStorageRoom", All).SetValue(room, (byte)_rooms.IndexOf(r), null);
+                room.GetType().GetProperty(R.Name("Room.Index"), All).SetValue(room, (byte)_rooms.IndexOf(r), null);
             }
 
             // Ambient zombies (stand-in count), away from the teams' starts.
@@ -216,7 +216,7 @@ namespace EpidemicServer.Match
             int slot = 1, hero = 0;
             foreach (TeamInfo t in _teams)
             {
-                int count = t.Name == "Team1" ? 3 : 4;
+                int count = t.Name == R.Name("Team.One") ? 3 : 4;
                 for (int i = 0; i < count && hero < botHeroes.Count; i++, slot++, hero++)
                 {
                     Weapon bm = melee == null ? null : new Weapon { Guid = Guid.NewGuid().ToByteArray(), SchematicId = melee.SchematicId, UserId = 0x7FFF0000UL + (ulong)slot };
@@ -247,7 +247,7 @@ namespace EpidemicServer.Match
             ServerHooks.BlockControl = BlockStagger;
             ServerHooks.ChooseTarget = NearestHero;
             ServerHooks.DamageFilter = WatchFriendlyFire;
-            _log("scavenger: map " + _g.MapName + ", win " + Target + ", truck full " + TruckFull + "; teams " +
+            _log("scavenger: map " + _g.MapName + ", win " + Target + ", truck full " + TruckLoaded + "; teams " +
                  string.Join("; ", _teams.Select(t => t.Name + " (index " + t.Index + ") start " + Fmt(Start(t)) + " truck " + Fmt(t.Truck) + ", " + t.Barricades.Count + " barricades").ToArray()) +
                  "; rooms " + string.Join(", ", _rooms.Select(r => r.Name + " " + r.Id).ToArray()) + "; " + _hoarderSpots.Count + " hoarder spots, " + placed + " ambient zombies; bots " +
                  string.Join(", ", Bots.Select(b => b.Name + " " + b.Team).ToArray()));
@@ -257,20 +257,20 @@ namespace EpidemicServer.Match
 
         private object SpawnBarricade(object map, float[] p, float[] d)
         {
-            Type t = R.Type("Barricade");
+            Type t = R.Type("Barrier");
             object b = _g.TakeFromPool(t);
             Type mt = map.GetType();
             b.GetType().GetField("Position", All).SetValue(b, _g.Vector2(p[0], p[1]));
-            b.GetType().GetField("SpawnPosition", All).SetValue(b, _g.Vector2(p[0], p[1]));
+            b.GetType().GetField(R.Name("Map.Position"), All).SetValue(b, _g.Vector2(p[0], p[1]));
             t.GetField(R.Name("Barricade.Facing"), All).SetValue(b, _g.Vector2(d[0], d[1]));
             FieldInfo part = t.GetField(R.Name("Barricade.Part"), All);
-            part.SetValue(b, Enum.Parse(part.FieldType, mt.GetField("Part").GetValue(map).ToString()));
-            t.GetField(R.Name("Barricade.Kind"), All).SetValue(b, mt.GetField("BarricadeType").GetValue(map));
+            part.SetValue(b, Enum.Parse(part.FieldType, mt.GetField(R.Name("Map.Piece")).GetValue(map).ToString()));
+            t.GetField(R.Name("Barricade.Kind"), All).SetValue(b, mt.GetField(R.Name("Map.BarricadeKind")).GetValue(map));
             FieldInfo team = t.GetField(R.Name("Barricade.Team"), All);
-            team.SetValue(b, Enum.Parse(team.FieldType, "Neutral"));
-            b.GetType().GetProperty("TeamId", All).SetValue(b, Enum.Parse(team.FieldType, "Neutral"), null);
-            _g.GameManagerType.GetMethod("SpawnGameObject", All).Invoke(_g.GameManager, new object[] { b, null, null });
-            float hp = ServerHooks.GetStat(b, "MaxHealth");
+            team.SetValue(b, Enum.Parse(team.FieldType, R.Name("Team.None")));
+            b.GetType().GetProperty(R.Name("Entity.Team"), All).SetValue(b, Enum.Parse(team.FieldType, R.Name("Team.None")), null);
+            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { b, null, null });
+            float hp = ServerHooks.GetStat(b, R.Name("Stat.HealthMax"));
             if (hp <= 0) hp = BarricadeHp;
             t.GetMethod(R.Name("Barricade.SetHealth"), All).Invoke(b, new object[] { hp });
             return b;
@@ -342,9 +342,9 @@ namespace EpidemicServer.Match
             if (_ended) return;
             // Per tick, once: the living zombies (the NPC list holds every pooled NPC, ~1400 on Resort).
             _zombies.Clear();
-            foreach (object npc in (Array)_g.GameManagerType.GetField("_NPCList", All).GetValue(_g.GameManager))
+            foreach (object npc in (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(_g.World))
                 if (npc != null && (bool)npc.GetType().GetProperty("IsActive", All).GetValue(npc, null) && !BotDriver.IsDead(npc) &&
-                    npc.GetType().GetProperty("TeamId", All).GetValue(npc, null).ToString() == GameRuntime.ZombieTeam) _zombies.Add(npc);
+                    npc.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(npc, null).ToString() == GameRuntime.ZombieTeam) _zombies.Add(npc);
             Respawns(time);
             Barricades();
             Rooms(dt);
@@ -374,7 +374,7 @@ namespace EpidemicServer.Match
                     continue;
                 }
                 List<object> group = t.Barricades[t.BarricadeAt];
-                float hp = group.Sum(b => Math.Max(0f, ServerHooks.GetStat(b, "Health"))), max = group.Sum(b => Math.Max(1f, ServerHooks.GetStat(b, "MaxHealth")));
+                float hp = group.Sum(b => Math.Max(0f, ServerHooks.GetStat(b, R.Name("Stat.Health")))), max = group.Sum(b => Math.Max(1f, ServerHooks.GetStat(b, R.Name("Stat.HealthMax"))));
                 int pct = (int)Math.Round(100f * hp / max);
                 SetTeam(t, R.Name("ScavengerTeam.BarricadeHealth"), pct);
                 if (group.All(Destroyed))
@@ -388,11 +388,11 @@ namespace EpidemicServer.Match
         }
 
         /// <summary>
-        /// Capture (rules from the client, numbers ours). The StorageRoom entity carries DenyRoomHolder (the owner),
-        /// DenyTakeOverTeam (the team taking it over) and PerformedTriggerCapture (the team whose hero pressed the
-        /// capture key, slot 19, set by the game's own GameMode.TriggerCapturePerformed). The client shows "press
+        /// Capture (rules from the client, numbers ours). The RoomEntity entity carries Mode.DenyHolder (the owner),
+        /// Mode.DenyTakeover (the team taking it over) and Mode.CaptureFinished (the team whose hero pressed the
+        /// capture key, slot 19, set by the game's own Mode.OnCapture). The client shows "press
         /// to capture" only to teams that neither hold the room nor are taking it over, and "press to deny" to the
-        /// holder while another team takes it over (StorageRoomPoint prompt rule).
+        /// holder while another team takes it over (MapKind.RoomPoint prompt rule).
         /// - A press by a team that doesn't own the room starts its takeover; bots press when they stand in it.
         /// - A press by the owner during a takeover denies it (the takeover ends, progress lost).
         /// - Progress runs at x(capturing heroes present), pauses while another team is present (contested), and
@@ -404,7 +404,7 @@ namespace EpidemicServer.Match
             object none = Neutral();
             foreach (Room r in _rooms)
             {
-                var inRange = Players().Where(p => !BotDriver.IsDead(p) && Dist(ServerHooks.Position(p), r.At) <= CaptureRange).ToList();
+                var inRange = Players().Where(p => !BotDriver.IsDead(p) && Dist(ServerHooks.Position(p), r.At) <= CaptureReach).ToList();
                 var teams = inRange.Select(TeamOf).Distinct().ToList();
                 // Bots press the capture key, like a player would: after BotPressDelay in the room and at most once
                 // per BotPressEvery, to take a room their team doesn't own or to deny a takeover of theirs.
@@ -419,16 +419,16 @@ namespace EpidemicServer.Match
                     object team = TeamOf(b.Player);
                     bool takeOver = !team.Equals(r.Owner) && !team.Equals(r.Capturing);
                     bool deny = team.Equals(r.Owner) && !r.Capturing.Equals(none);
-                    if ((takeOver || deny) && ServerHooks.GetFieldValue(r.Entity, "PerformedTriggerCapture").Equals(none))
+                    if ((takeOver || deny) && ServerHooks.GetFieldValue(r.Entity, R.Name("Mode.CaptureFinished")).Equals(none))
                     {
-                        ServerHooks.SetField(r.Entity, "PerformedTriggerCapture", team);
+                        ServerHooks.SetField(r.Entity, R.Name("Mode.CaptureFinished"), team);
                         _nextPress[b] = _time + BotPressEvery;
                     }
                 }
-                object pressed = ServerHooks.GetFieldValue(r.Entity, "PerformedTriggerCapture");
+                object pressed = ServerHooks.GetFieldValue(r.Entity, R.Name("Mode.CaptureFinished"));
                 if (!pressed.Equals(none))
                 {
-                    ServerHooks.SetField(r.Entity, "PerformedTriggerCapture", none);
+                    ServerHooks.SetField(r.Entity, R.Name("Mode.CaptureFinished"), none);
                     if (pressed.Equals(r.Owner) && !r.Capturing.Equals(none))
                     {
                         _log("scavenger: " + r.Name + ": " + pressed + " denied " + r.Capturing + "'s takeover");
@@ -461,8 +461,8 @@ namespace EpidemicServer.Match
                         }
                     }
                 }
-                ServerHooks.SetField(r.Entity, "DenyRoomHolder", r.Owner);
-                ServerHooks.SetField(r.Entity, "DenyTakeOverTeam", r.Capturing);
+                ServerHooks.SetField(r.Entity, R.Name("Mode.DenyHolder"), r.Owner);
+                ServerHooks.SetField(r.Entity, R.Name("Mode.DenyTakeover"), r.Capturing);
             }
             if (changed) SyncRooms();
         }
@@ -473,7 +473,7 @@ namespace EpidemicServer.Match
         private readonly Dictionary<string, float> _inRoomSince = new Dictionary<string, float>();
         private readonly Dictionary<Bot, float> _nextPress = new Dictionary<Bot, float>();
 
-        private static object TeamOf(object p) { return p.GetType().GetProperty("TeamId", All).GetValue(p, null); }
+        private static object TeamOf(object p) { return p.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(p, null); }
 
         private void Income(float time)
         {
@@ -557,7 +557,7 @@ namespace EpidemicServer.Match
         private void EndGame(float time)
         {
             foreach (TeamInfo t in _teams)
-                if (_fillTruckTeam == null && Delivered(t) >= TruckFull)
+                if (_fillTruckTeam == null && Delivered(t) >= TruckLoaded)
                 {
                     _fillTruckTeam = t.Id;
                     _night = true;
@@ -579,20 +579,20 @@ namespace EpidemicServer.Match
         {
             _ended = true;
             _winner = winner;
-            SetGame(R.Name("ScavengerState.GameOver"), true);
+            SetGame(R.Name("ScavengerState.Ended"), true);
             _mode.GetType().GetProperty("IsCompleted", All).SetValue(_mode, true, null);
-            ServerHooks.SyncNow = true;   // IsCompleted in the same frame as TeamFinished
+            ServerHooks.SyncNow = true;   // IsCompleted in the same frame as team finished
             var ranking = _teams.OrderByDescending(Delivered).ToList();
             ranking.Remove(ranking.First(t => t.Id.Equals(winner)));
             ranking.Insert(0, _teams.First(t => t.Id.Equals(winner)));
             for (int i = 0; i < ranking.Count; i++)
             {
                 int team = Convert.ToInt32(ranking[i].Id), placement = i;
-                ServerHooks.SendGameMessage(TeamFinishedMessage, m => { m.WriteBits((uint)team, 3); m.WriteBits((uint)placement, 3); m.Write(true); });
+                ServerHooks.SendMatchMessage(TeamFinishedMessage, m => { m.WriteBits((uint)team, 3); m.WriteBits((uint)placement, 3); m.Write(true); });
             }
             byte race = Convert.ToByte(_barricadeRaceTeam ?? Neutral()), fill = Convert.ToByte(_fillTruckTeam ?? Neutral()), win = Convert.ToByte(winner);
-            ServerHooks.SendGameMessage(MedalMessage, m => { m.Write(race); m.Write(fill); m.Write(win); });
-            int mine = ranking.FindIndex(t => t.Name == "Team1");
+            ServerHooks.SendMatchMessage(MedalMessage, m => { m.Write(race); m.Write(fill); m.Write(win); });
+            int mine = ranking.FindIndex(t => t.Name == R.Name("Team.One"));
             var boxes = new List<int> { MissionBox, TimeBox };
             if (mine == 0) boxes.Add(VictoryBox);
             if (_barricadeRaceTeam != null && Convert.ToInt32(_barricadeRaceTeam) == 1) boxes.Add(FirstBarricadeBox);
@@ -618,14 +618,14 @@ namespace EpidemicServer.Match
                     continue;
                 }
                 if (time - at < RespawnSeconds) continue;
-                object team = p.GetType().GetProperty("TeamId", All).GetValue(p, null);
-                float[] spawn = ServerHooks.Vector(_mode.GetType().GetMethod("GetSpawnPosition", All).Invoke(_mode, new[] { team }));
+                object team = p.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(p, null);
+                float[] spawn = ServerHooks.Vector(_mode.GetType().GetMethod(R.Name("World.SpawnAt"), All).Invoke(_mode, new[] { team }));
                 Bot respawning = Bots.FirstOrDefault(x => x.Player == p);
                 if (respawning != null) spawn = BotRespawnPoint(team, spawn);
                 object v = _g.Vector2(spawn[0], spawn[1]);
-                p.GetType().GetField("SpawnPosition", All).SetValue(p, v);
-                _g.Game("ConductorGameLogic.Entities.Entity").GetMethod("Teleport", All).Invoke(p, new object[] { v, true });
-                p.GetType().GetMethod("Respawn", All, null, Type.EmptyTypes, null).Invoke(p, null);
+                p.GetType().GetField(R.Name("Map.Position"), All).SetValue(p, v);
+                R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(p, new object[] { v, true });
+                p.GetType().GetMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(p, null);
                 _diedAt.Remove(p);
                 Bot bot = Bots.FirstOrDefault(x => x.Player == p);
                 if (bot != null) bot.RespawnedAt = time;
@@ -661,9 +661,9 @@ namespace EpidemicServer.Match
         /// <summary>
         /// No stagger from basic attacks between heroes (owner, 2026-10-07, from footage of the original's
         /// Scavenger: player basic attacks don't stun each other; abilities that stun still do). Every basic
-        /// attack hit carries the knockback-stun buff Buff.KnockbackStun; on our server it staggered heroes hit by heroes,
+        /// attack hit carries the knockback-stun buff Effect.KnockStun; on our server it staggered heroes hit by heroes,
         /// so bots stun-locked the human. Basic attacks are the weapon primaries, whose hits are the hit objects
-        /// Hit.MeleePrimary (LightPrimary, HeavyPrimary, FistsPrimary) and Hit.RangedPrimary (PistolsPrimary, ShotgunPrimary, 142)
+        /// Hit.MeleePrimary (Ability.LightFirst, Ability.HeavyFirst, fists primary) and Hit.RangedPrimary (pistols primary, Ability.GunFirst, 142)
         /// (per the game's ability registrations); the buff is dropped when one of those applies it, hero to hero.
         /// Damage still lands; zombies still stagger heroes, and heroes still stagger zombies.
         /// </summary>
@@ -692,7 +692,7 @@ namespace EpidemicServer.Match
 
         private int _friendlyLogged;
 
-        /// <summary>Logs hero damage between teammates (the game's IsEnemy forbids it; watched since the 2026-10-07 playtest).</summary>
+        /// <summary>Logs hero damage between teammates (the game's Entity.Hostile forbids it; watched since the 2026-10-07 playtest).</summary>
         private float WatchFriendlyFire(object victim, object changer, float value)
         {
             if (_friendlyLogged >= 20 || changer == null) return value;
@@ -735,18 +735,18 @@ namespace EpidemicServer.Match
             TeamInfo t = _teams.First(x => x.Name == b.Team);
             float[] me = ServerHooks.Position(b.Player);
             object teamId = t.Id;
-            object enemy = Players().Where(p => !BotDriver.IsDead(p) && !p.GetType().GetProperty("TeamId", All).GetValue(p, null).Equals(teamId) && Dist(ServerHooks.Position(p), me) <= 45f)
+            object enemy = Players().Where(p => !BotDriver.IsDead(p) && !p.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(p, null).Equals(teamId) && Dist(ServerHooks.Position(p), me) <= 45f)
                                     .OrderBy(p => Dist(ServerHooks.Position(p), me)).FirstOrDefault()
                          ?? Zombies().Where(z => Dist(ServerHooks.Position(z), me) <= 25f).OrderBy(z => Dist(ServerHooks.Position(z), me)).FirstOrDefault();
             // A target the bot can't reach (behind a wall, in a spawn pose in the scenery) is dropped after
             // GiveUpSeconds and ignored for IgnoreSeconds (ours; four bots stood at an unreachable walker).
             if (enemy != null && b.Ignore.ContainsKey(enemy) && time < b.Ignore[enemy]) enemy = null;
-            if (enemy != b.Target || enemy == null) { b.TargetSince = time; b.TargetHp = enemy == null ? 0f : ServerHooks.GetStat(enemy, "Health"); }
+            if (enemy != b.Target || enemy == null) { b.TargetSince = time; b.TargetHp = enemy == null ? 0f : ServerHooks.GetStat(enemy, R.Name("Stat.Health")); }
             else
             {
                 // Progress means the target lost health; none for GiveUpSeconds (out of reach, or behind a wall
                 // or barricade while in "range") and it is ignored for a while.
-                float hp = ServerHooks.GetStat(enemy, "Health");
+                float hp = ServerHooks.GetStat(enemy, R.Name("Stat.Health"));
                 if (hp < b.TargetHp) { b.TargetHp = hp; b.TargetSince = time; }
                 else if (time - b.TargetSince > GiveUpSeconds) { b.Ignore[enemy] = time + IgnoreSeconds; enemy = null; }
             }
@@ -787,7 +787,7 @@ namespace EpidemicServer.Match
 
         private IEnumerable<object> Zombies() { return _zombies; }
 
-        private object Supplies() { return _mode.GetType().GetProperty("SupplyData", All).GetValue(_mode, null); }
+        private object Supplies() { return _mode.GetType().GetProperty(R.Name("Mode.Supplies"), All).GetValue(_mode, null); }
 
         private int Delivered(TeamInfo t) { return (int)Supplies().GetType().GetMethod(R.Name("Supplies.Delivered"), All).Invoke(Supplies(), new[] { t.Id }); }
 
@@ -799,19 +799,19 @@ namespace EpidemicServer.Match
 
         private int Carried(object p)
         {
-            ushort idx = (ushort)p.GetType().GetProperty("IndexPlayer", All).GetValue(p, null);
+            ushort idx = (ushort)p.GetType().GetProperty(R.Name("Entity.HeroIndex"), All).GetValue(p, null);
             return (int)Supplies().GetType().GetMethod(R.Name("Supplies.Carried"), All).Invoke(Supplies(), new object[] { (int)idx });
         }
 
         public int DeliveredTeam1() { return Delivered(_teams[0]); }
 
-        private object Neutral() { return Enum.Parse(_human.GetType().GetProperty("TeamId", All).PropertyType, "Neutral"); }
+        private object Neutral() { return Enum.Parse(_human.GetType().GetProperty(R.Name("Entity.Team"), All).PropertyType, R.Name("Team.None")); }
 
         private static float[] Start(TeamInfo t) { return t.Start == null ? new float[] { 0, 0 } : new[] { t.Start.X, t.Start.Y }; }
 
         private static float[] Pos(object o) { return ServerHooks.Position(o); }
 
-        private static bool Destroyed(object o) { return BotDriver.Gone(o) || ServerHooks.GetStat(o, "Health") <= 1f && o.GetType().Name == R.Short("Barricade"); }
+        private static bool Destroyed(object o) { return BotDriver.Gone(o) || ServerHooks.GetStat(o, R.Name("Stat.Health")) <= 1f && o.GetType().Name == R.Short("Barrier"); }
 
         private static object GetField(object o, string name)
         {

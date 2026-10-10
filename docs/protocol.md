@@ -18,7 +18,7 @@ Then, by kind:
 - **Request**: 16-byte request id (a GUID), uint16 type, body.
 - **Response**: the request's 16-byte id, varint result code, body (only when result is OK).
 
-Result codes: 0 OK, 1 Disconnected, 2 Timeout, 3 DeserializeFail, 4 UnrecognizedError, 5 PermissionDenied.
+Result codes: 0 OK, 1 Disconnected, 2 Timeout, 3 BadPayload, 4 Unrecognised, 5 NotAllowed.
 Clients time requests out after 30 s by default (15 s for matchmaking tickets).
 
 ## Value encoding
@@ -37,25 +37,25 @@ Clients time requests out after 30 s by default (15 s for matchmaking tickets).
 
 ## Login sequence (request server)
 
-1. Client connects to port 1555 and sends **LoginRequest** (type 43):
+1. Client connects to port 1555 and sends **SignOn** (type 43):
    Steam ticket (byte[]), version major/minor/build/revision (varints),
    branch (string), language (varint), profile name (string).
-2. Server responds OK with **LoginResponse**: result, queue position, logins per second (float).
-3. Server then sends the **LoginDataMessage** message (type 44): result,
+2. Server responds OK with **SignOnReply**: result, queue position, logins per second (float).
+3. Server then sends the **SignOnData** message (type 44): result,
    session ticket, user id, currencies, spending, account data, first-login
    flag, inventory lists, DLC list, disabled features, gameplay changes,
    login rewards, session id, ban info, welcome URL, server time.
    The client treats login as complete only when this message arrives.
-4. On reconnect the client re-authenticates with **AuthRequest** (type 1,
-   session ticket) or **SteamAuthRequest** (type 25, Steam ticket).
+4. On reconnect the client re-authenticates with **SignIn** (type 1,
+   session ticket) or **PlatformSignIn** (type 25, Steam ticket).
 
 Our server accepts any ticket: there is no account system to protect, and
 Steam itself is left untouched.
 
 ## Request ids handled so far
 
-See `server/src/Protocol/GameMessageIds.cs`. Unknown requests are logged with
-their body and answered with UnrecognizedError so the client never waits for
+See `server/src/Protocol/LinkMessageIds.cs`. Unknown requests are logged with
+their body and answered with Unrecognised so the client never waits for
 a timeout.
 
 ## Story map unlocks and owned characters
@@ -63,10 +63,10 @@ a timeout.
 Checked against the game's own account serializer, loaded from the player's install, by
 `tests/run_windows_checks.cmd` (all cases byte-identical).
 
-- **UnlockStoryMapNodeRequest** (type 20): varint node id, varint choice
+- **OpenNode** (type 20): varint node id, varint choice
   count, one byte per choice, varint story map revision (the hub sends -1).
-- Reply: varint result (1 Success, 2 CannotUnlock, 3 RevisionOutdated,
-  4 WrongAmountOfChoices, 5 NotEnoughPoints, 6 AlreadyUnlocked), varint count
+- Reply: varint result (1 Success, 2 Locked, 3 StaleRevision,
+  4 WrongChoiceCount, 5 TooFewPoints, 6 Duplicate), varint count
   of unique rewards (we send 0), varint revision (echoed).
 - The free first character is node 2, one choice: 0-3 the four starting heroes
   (character ids 7, 5, 8, 6), or 4 for 7200 character points.
@@ -75,7 +75,7 @@ Checked against the game's own account serializer, loaded from the player's inst
   times unlocked, byte choice count, choice bytes; then byte 1, varint
   character count, then per character byte id, bool owned, varint xp. An
   account with nothing unlocked is sent as an empty blob.
-- **GetMatchmakingTicketRequest** (type 58) reply: bool success, byte[] ticket
+- **MatchTicket** (type 58) reply: bool success, byte[] ticket
   (we send 16 random bytes).
 
 The server keeps the account in `server/bin/account.txt` (git-ignored, one
@@ -85,10 +85,10 @@ The server keeps the account in `server/bin/account.txt` (git-ignored, one
 
 The field layout matches the type 10 request the hub sends, byte for byte.
 
-- **SoloServerCreateRequest** (type 10): auth data (byte[] session ticket,
+- **SoloServer** (type 10): auth data (byte[] session ticket,
   four varint version numbers, string branch, varint int), byte[] matchmaking
   ticket, varint queue type, varint map index. We accept any ticket.
-- Reply (SoloServerCreated): varint auth result (1 Success), varint join
+- Reply (solo server created): varint auth result (1 Success), varint join
   queue result (1 Success), byte[] match server IPv4 address, ushort port
   (little-endian). With a nonzero port the hub starts the match client with
   `+connect <ip> <port>`; port 0 makes it show a "server failed" popup.
@@ -138,7 +138,7 @@ uses).
 
 - After a few seconds of unanswered UDP, the match client connects to the
   same port over TCP, using the request-server framing.
-- **GameplayAuthRequest** (type 5): varint server port, byte[] client hail
+- **MatchSignIn** (type 5): varint server port, byte[] client hail
   (the same bytes as in the UDP Connect).
 - Reply OK: varint 1 (Success), byte[] server hail. The server builds the hail
   at run time with the game's own serializers, loaded from the player's install:
@@ -149,16 +149,16 @@ uses).
   request server, and its connection data (camera direction, name, ...). The
   camera direction must reach the server's copy of the client info, or the
   player can't move.
-- Then both sides exchange message type 38 (**GameplayData**), one game frame
+- Then both sides exchange message type 38 (**MatchFrame**), one game frame
   per message.
   - **Client frames:** controller input, then two reliable message layers
     (in-order and unordered). Reliable payloads start with a byte kind
-    (0 game message, 1 debug) and a byte type, for example 20 LoadingComplete,
-    28 ClientStats, 14 SkipTutorialIntro.
+    (0 game message, 1 debug) and a byte type, for example 20 Loaded,
+    28 Msg.Stats, 14 IntroSkipped.
   - **Server frames:** the two reliable layers (acks and queued messages), the
     controllers of every client slot (the player and any bots), then the
     synchronised objects (a count, then per object its index and its own state).
-    Before LoadingComplete the server sends empty frames.
+    Before Loaded the server sends empty frames.
 
 ## Match server: combat
 
@@ -175,7 +175,7 @@ uses).
   target index), and the game's own code applies them to the player's ability
   bar.
 - **Destroy message** (one per destroyed object and client that has seen it,
-  reliable, in order, channel 0): byte 1, byte 0, byte 21 (GameObjectDestroyed),
+  reliable, in order, channel 0): byte 1, byte 0, byte 21 (game object destroyed),
   the client's spawn id for the object (ranged 0..3), its global index (ranged
   0..number of game objects), then the object's own destroy serializer (for an
   NPC: dead flag and killer). The client plays the death from it. Objects that
@@ -187,4 +187,4 @@ uses).
 
 - Weapons given during a match (for example the tutorial's paddle) are sent as a reliable game message: bytes 01 00 07 00, then the player's updated client info.
 - The pickup objects (the paddle) are not entities. Their position is a field on the pickup base type, and the server never needs to move them after spawning.
-- Barricades are pooled destructibles. The server sets position, facing, part, barricade type and team (we use Neutral), spawns them, then sets Health and MaxHealth together through the barricade's own hp setter.
+- Barricades are pooled destructibles. The server sets position, facing, part, barricade type and team (we use Neutral), spawns them, then sets Health and Stat.HealthMax together through the barricade's own hp setter.

@@ -1,15 +1,13 @@
 # Client server configuration
 
-The client reads its server addresses from `ip.cfg` in the install root (XML,
-one `<branch name="public">` element). It names four endpoints:
+The client reads its server addresses from `ip.cfg` in the install root: a small XML file with one
+`<branch name="public">` element. That branch holds four entries, each a server address:
 
-| Element | Purpose (inferred from name) |
-|---|---|
-| `RequestServerIP` | request/API host (a hostname) |
-| `MatchmakingServerIPEU` | EU matchmaking server |
-| `MatchmakingServerIPNA` | NA matchmaking server |
-| `StatsServerIP` | stats server |
+- the request (login and account) host, given as a hostname;
+- two regional matchmaking servers;
+- the stats server.
 
-All original hosts are offline. Pointing these at `127.0.0.1` should let the
-unmodified client reach a local server, which is a config change rather than a
-change to the client program. Not yet tested. Ports and protocols are still unknown.
+All the original hosts are offline. `tools/point-client-at-local.ps1` sets every entry of the public
+branch to `127.0.0.1`, so the unmodified client reaches the local server. This is a change to a
+configuration file only, never to the game's programs. The original file is kept as
+`ip.cfg.original`, and `-Restore` puts it back.

@@ -4,25 +4,26 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using EpidemicServer.Resolve;
 
 namespace EpidemicServer.Match
 {
-    /// <summary>What goes into one player's end-of-match rewards (PlayerRewardData fields we fill).</summary>
+    /// <summary>What goes into one player's end-of-match rewards (player reward data fields we fill).</summary>
     [Serializable]
     public sealed class RewardsInput
     {
-        public int ZombieKills, Deaths, Supplies, TeamSupplies, Damage, MapIndex, LevelReached, AccountExperience;
-        public long StartTimeTicks;
-        public uint MatchTimeSeconds;
+        public int UndeadKills, Deaths, Supplies, SuppliesBanked, Damage, MapIndex, LevelHit, AccountXp;
+        public long StartTicks;
+        public uint MatchSeconds;
         public byte Team, Placement, Character, QueueType;
         public ulong SteamId;
-        public int[] BoxIds = new int[0], BoxScores = new int[0];
+        public int[] BoxIds = new int[0], BoxPoints = new int[0];
         public byte[] Weapon1, Weapon2;
     }
 
     /// <summary>
-    /// Builds the end-of-match rewards blob (GameMessage 5, written by the match client to
-    /// lastRewards.data and read by the hub) with the hub's own ConductorGameLogic.PlayerRewards
+    /// Builds the end-of-match rewards blob (MatchMessage 5, written by the match client to
+    /// lastRewards.data and read by the hub) with the hub's own Payout
     /// .Serialize (version 9). The hub's Assembly-CSharp has the same name as the match client's,
     /// so it is loaded in a separate AppDomain.
     /// </summary>
@@ -36,7 +37,7 @@ namespace EpidemicServer.Match
             return Writer(install).Build(input);
         }
 
-        /// <summary>The characters the hub lists (CharacterData.GetAllCharacters: not None, not [Hide]).</summary>
+        /// <summary>The characters the hub lists (get all characters: not None, not [Hide]).</summary>
         public static byte[] ListedCharacters(string install)
         {
             return Writer(install).ListedCharacters();
@@ -70,51 +71,53 @@ namespace EpidemicServer.Match
                 return File.Exists(p) ? Assembly.LoadFrom(p) : null;
             };
             _hub = Assembly.LoadFrom(Path.Combine(managed, "Assembly-CSharp.dll"));
+            // This AppDomain has its own resolver state: point it at the hub's library.
+            R.Init(new[] { _hub });
         }
 
         /// <summary>
         /// Characters the hub lists (not None, not [Hide]) that also have a hub model: the hub loads one prefab per
-        /// character from CharacterLoader.prefabMapping (filled by its Initialize). Logan is listed but has no
-        /// prefab, so he is left out (owner, 2026-10-07: only characters with a hub model).
+        /// character from HeroLoader.Prefabs (filled by its Initialize). One listed character has no
+        /// prefab, so it is left out (owner, 2026-10-07: only characters with a hub model).
         /// </summary>
         public byte[] ListedCharacters()
         {
-            Type e = _hub.GetType("CharacterEnum", true);
-            Type loader = _hub.GetType("CharacterLoader", true);
+            Type e = _hub.GetType(R.Name("Type.HeroId"), true);
+            Type loader = _hub.GetType(R.Name("Type.HeroLoader"), true);
             loader.GetMethod("Initialize", All).Invoke(null, null);
-            IDictionary prefabs = (IDictionary)loader.GetField("prefabMapping", All).GetValue(null);
+            IDictionary prefabs = (IDictionary)loader.GetField(R.Name("HeroLoader.Prefabs"), All).GetValue(null);
             return e.GetFields(BindingFlags.Public | BindingFlags.Static)
-                .Where(f => Convert.ToInt32(f.GetValue(null)) > 0 && !f.GetCustomAttributes(false).Any(a => a.GetType().Name == "HideAttribute") &&
+                .Where(f => Convert.ToInt32(f.GetValue(null)) > 0 && !f.GetCustomAttributes(false).Any(a => a.GetType().Name == R.Name("Type.HiddenMark")) &&
                             prefabs != null && prefabs.Contains(f.GetValue(null)))
                 .Select(f => (byte)Convert.ToInt32(f.GetValue(null))).ToArray();
         }
 
         public byte[] Build(RewardsInput input)
         {
-            Type rewardsType = _hub.GetType("ConductorGameLogic.PlayerRewards", true);
+            Type rewardsType = _hub.GetType(R.Name("Type.Payout"), true);
             FieldInfo dataField = rewardsType.GetField("Data");
             Type dataType = dataField.FieldType;
             object data = Activator.CreateInstance(dataType);
-            Set(data, "ZombieKills", input.ZombieKills);
-            Set(data, "Deaths", input.Deaths);
-            Set(data, "Supplies", input.Supplies);
-            Set(data, "TeamSupplies", input.TeamSupplies);
-            Set(data, "Damage", input.Damage);
-            Set(data, "StartTimeTicks", input.StartTimeTicks);
-            Set(data, "MatchTimeSeconds", input.MatchTimeSeconds);
-            Set(data, "Team", input.Team);
-            Set(data, "MapIndex", input.MapIndex);
-            Set(data, "LevelReached", input.LevelReached);
-            SetEnum(data, "Placement", input.Placement);
+            Set(data, R.Name("Record.Kills"), input.UndeadKills);
+            Set(data, R.Name("Record.Deaths"), input.Deaths);
+            Set(data, R.Name("Record.Supplies"), input.Supplies);
+            Set(data, R.Name("Record.SquadSupplies"), input.SuppliesBanked);
+            Set(data, R.Name("Record.Damage"), input.Damage);
+            Set(data, R.Name("Record.Start"), input.StartTicks);
+            Set(data, R.Name("Record.Seconds"), input.MatchSeconds);
+            Set(data, R.Name("Record.Team"), input.Team);
+            Set(data, R.Name("World.MapNumber"), input.MapIndex);
+            Set(data, R.Name("Record.Level"), input.LevelHit);
+            SetEnum(data, R.Name("Record.Place"), input.Placement);
             SetEnum(data, "Character", input.Character);
-            SetEnum(data, "GameMode", input.QueueType);
-            Set(data, "Weapon1", input.Weapon1 ?? new byte[0]);
-            Set(data, "Weapon2", input.Weapon2 ?? new byte[0]);
-            Set(data, "NewUnlockedNodes", new int[0]);
-            Set(data, "CrossroadCompleteScores", new byte[0]);
-            Set(data, "CrossroadMissionTypes", new byte[0]);
+            SetEnum(data, R.Name("World.Mode"), input.QueueType);
+            Set(data, R.Name("Fighter.WeaponA"), input.Weapon1 ?? new byte[0]);
+            Set(data, R.Name("Fighter.WeaponB"), input.Weapon2 ?? new byte[0]);
+            Set(data, R.Name("Record.NewNodes"), new int[0]);
+            Set(data, R.Name("Record.CrossScores"), new byte[0]);
+            Set(data, R.Name("Record.CrossKinds"), new byte[0]);
 
-            FieldInfo boxesField = dataType.GetField("BoxScores");
+            FieldInfo boxesField = dataType.GetField(R.Name("Record.Boxes"));
             Type boxType = boxesField.FieldType.GetElementType();
             Array boxes = Array.CreateInstance(boxType, input.BoxIds.Length);
             for (int i = 0; i < boxes.Length; i++)
@@ -122,34 +125,34 @@ namespace EpidemicServer.Match
                 object box = Activator.CreateInstance(boxType);
                 FieldInfo id = boxType.GetField("ID");
                 id.SetValue(box, Enum.ToObject(id.FieldType, input.BoxIds[i]));
-                boxType.GetField("Score").SetValue(box, input.BoxScores[i]);
+                boxType.GetField("Score").SetValue(box, input.BoxPoints[i]);
                 boxes.SetValue(box, i);
             }
             boxesField.SetValue(data, boxes);
 
-            foreach (string name in new[] { "Rewards", "FirstWinRewards" })
+            foreach (string name in new[] { R.Name("Record.Rewards"), R.Name("Record.FirstVictory") })
             {
                 FieldInfo f = dataType.GetField(name);
                 object collection = Activator.CreateInstance(f.FieldType);
                 FillEmpty(collection);
-                if (name == "Rewards") Set(collection, "AccountExperience", input.AccountExperience);
+                if (name == R.Name("Record.Rewards")) Set(collection, R.Name("Record.AccountXp"), input.AccountXp);
                 f.SetValue(data, collection);
             }
 
             object rewards = Activator.CreateInstance(rewardsType);
             dataField.SetValue(rewards, data);
-            FieldInfo players = rewardsType.GetField("PlayersInMatch");
+            FieldInfo players = rewardsType.GetField(R.Name("Record.Players"));
             Type playerType = players.FieldType.GetElementType();
             object player = Activator.CreateInstance(playerType);
-            playerType.GetField("SteamID").SetValue(player, input.SteamId);
-            FieldInfo team = playerType.GetField("Team");
+            playerType.GetField(R.Name("Record.Account")).SetValue(player, input.SteamId);
+            FieldInfo team = playerType.GetField(R.Name("Record.Team"));
             team.SetValue(player, Enum.ToObject(team.FieldType, (int)input.Team));
             Array list = Array.CreateInstance(playerType, 1);
             list.SetValue(player, 0);
             players.SetValue(rewards, list);
 
-            // As RewardSerialization.ReadRewardFile, but writing: a LidgrenNetBuffer over a new inner buffer.
-            Type bufferType = _hub.GetType("StunGameNetwork.LidgrenNetBuffer", true);
+            // As read reward file, but writing: a NetBuffer over a new inner buffer.
+            Type bufferType = _hub.GetType(R.Name("Type.NetBuffer"), true);
             ConstructorInfo ctor = bufferType.GetConstructors(All).First(c => c.GetParameters().Length == 1);
             object buffer = ctor.Invoke(new[] { Activator.CreateInstance(ctor.GetParameters()[0].ParameterType, true) });
             MethodInfo serialize = rewardsType.GetMethods(All).First(m => m.Name == "Serialize" && m.GetParameters().Length == 1);
@@ -157,7 +160,7 @@ namespace EpidemicServer.Match
             serialize.Invoke(rewards, args);
             MethodInfo lengthBytes = LengthInBytes(bufferType, ctor);
             MethodInfo getData = bufferType.GetMethods(All).FirstOrDefault(m => m.Name == "get_Data");
-            if (lengthBytes == null || getData == null) throw new MissingMethodException("LidgrenNetBuffer length/get_Data");
+            if (lengthBytes == null || getData == null) throw new MissingMethodException("NetBuffer length/get_Data");
             int length = (int)lengthBytes.Invoke(buffer, null);
             byte[] all = (byte[])getData.Invoke(buffer, null);
             byte[] bytes = new byte[length];

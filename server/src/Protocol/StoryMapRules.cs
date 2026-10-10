@@ -7,7 +7,7 @@ namespace EpidemicServer.Protocol
     public sealed class StoryMapNode
     {
         public int Id;
-        public byte UnlockedTimes = 1;
+        public byte TimesUnlocked = 1;
         public List<byte> Choices = new List<byte>();
     }
 
@@ -20,15 +20,15 @@ namespace EpidemicServer.Protocol
     }
 
     /// <summary>Outcomes of a story map node unlock, as the client numbers them.</summary>
-    public enum StoryMapUnlockResult
+    public enum UnlockOutcome
     {
         UnknownError = 0,
         Success = 1,
-        CannotUnlock = 2,
-        RevisionOutdated = 3,
-        WrongAmountOfChoices = 4,
-        NotEnoughPoints = 5,
-        AlreadyUnlocked = 6,
+        Locked = 2,
+        StaleRevision = 3,
+        WrongChoiceCount = 4,
+        TooFewPoints = 5,
+        Duplicate = 6,
     }
 
     /// <summary>
@@ -69,7 +69,7 @@ namespace EpidemicServer.Protocol
             foreach (StoryMapNode n in nodes)
             {
                 w.WriteVarInt32(n.Id);
-                w.WriteByte(n.UnlockedTimes);
+                w.WriteByte(n.TimesUnlocked);
                 w.WriteByte((byte)n.Choices.Count);
                 foreach (byte c in n.Choices) w.WriteByte(c);
             }
@@ -85,28 +85,28 @@ namespace EpidemicServer.Protocol
         }
 
         /// <summary>Applies an unlock to the account. Only the first-character node grants anything so far.</summary>
-        public static StoryMapUnlockResult Unlock(Account a, int nodeId, byte[] choices)
+        public static UnlockOutcome Unlock(Account a, int nodeId, byte[] choices)
         {
             foreach (StoryMapNode n in a.Nodes)
-                if (n.Id == nodeId) return StoryMapUnlockResult.AlreadyUnlocked;
+                if (n.Id == nodeId) return UnlockOutcome.Duplicate;
 
             if (nodeId == FirstCharacterNode)
             {
-                if (choices.Length != 1) return StoryMapUnlockResult.WrongAmountOfChoices;
+                if (choices.Length != 1) return UnlockOutcome.WrongChoiceCount;
                 byte choice = choices[0];
                 if (choice < FirstCharacterChoices.Length)
                     AddCharacter(a, FirstCharacterChoices[choice]);
                 else if (choice == FirstCharacterPointsChoice)
-                    a.CharacterPoints += FirstCharacterPoints;
+                    a.HeroPoints += FirstCharacterPoints;
                 else
-                    return StoryMapUnlockResult.CannotUnlock;
+                    return UnlockOutcome.Locked;
             }
 
             StoryMapNode node = new StoryMapNode();
             node.Id = nodeId;
             node.Choices.AddRange(choices);
             a.Nodes.Add(node);
-            return StoryMapUnlockResult.Success;
+            return UnlockOutcome.Success;
         }
 
         private static void AddCharacter(Account a, byte id)
@@ -118,7 +118,7 @@ namespace EpidemicServer.Protocol
             a.Characters.Add(added);
         }
 
-        public static byte[] UnlockResponse(StoryMapUnlockResult result, int revision)
+        public static byte[] UnlockResponse(UnlockOutcome result, int revision)
         {
             WireWriter w = new WireWriter();
             w.WriteVarInt32((int)result);

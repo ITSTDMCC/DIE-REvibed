@@ -1,4 +1,5 @@
 using System;
+using EpidemicServer.Resolve;
 using System.IO;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -14,7 +15,7 @@ namespace EpidemicServer.Match
     /// </summary>
     public sealed class MatchHost
     {
-        /// <summary>Camera direction from the match client's own connect hail (ClientConnectionData).</summary>
+        /// <summary>Camera direction from the match client's own connect hail (Net.Connection).</summary>
         public const float DefaultCameraX = -67.175f, DefaultCameraY = -67.175f;
 
         private readonly string _install;
@@ -25,7 +26,7 @@ namespace EpidemicServer.Match
 
         public GameRuntime Game;
         public object Player;
-        public object ClientInfoData;
+        public object ClientInfoObject;
         public SpawnPoint Spawn;
         public TutorialDirector Tutorial;
         public ScoutDirector Scout;
@@ -98,7 +99,7 @@ namespace EpidemicServer.Match
 
         private MatchSession _session;
 
-        /// <summary>Called by matchmaking for each SoloServerCreate: practice is queue 6 (ResistanceEasy) on map 15/16/17.</summary>
+        /// <summary>Called by matchmaking for each SoloServerCreate: practice is queue 6 (resistance easy) on map 15/16/17.</summary>
         public void RequestMatch(int queueType, int mapIndex)
         {
             Post(() =>
@@ -122,11 +123,11 @@ namespace EpidemicServer.Match
         private void ChooseCharacterAndInfection(bool tutorial)
         {
             MatchLoadout l = MatchLoadout.Current;
-            Type characterEnum = Game.GameManagerType.GetMethod("CacheGame", GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
+            Type characterEnum = Game.WorldType.GetMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
             string character = Enum.GetName(characterEnum, GameRuntime.DefaultHero);
             if (!tutorial && l != null && Enum.IsDefined(characterEnum, (int)l.Character)) character = Enum.GetName(characterEnum, (int)l.Character);
             Game.Character = character;
-            Game.ServerLevel = 1;
+            Game.MatchLevel = 1;
             if (tutorial) return;
             try
             {
@@ -134,22 +135,22 @@ namespace EpidemicServer.Match
                 lock (_account) level = Leveling.AccountLevel(Game, AccountView.EffectiveXp(_account));
                 ushort melee = l != null && l.Melee != null ? l.Melee.SchematicId : Protocol.Inventory.DefaultMeleeSchematic;
                 ushort ranged = l != null && l.Ranged != null ? l.Ranged.SchematicId : Protocol.Inventory.DefaultRangedSchematic;
-                Game.ServerLevel = Math.Max(1, Game.InfectionLevelFor(character, level, melee, ranged, l == null ? null : l.Gadgets, _account.UserId, out strength));
-                Log.Info("match: " + character + " at account level " + level + " with " + melee + "/" + ranged + ": strength " + strength + " -> infection level " + Game.ServerLevel);
+                Game.MatchLevel = Math.Max(1, Game.InfectionLevelFor(character, level, melee, ranged, l == null ? null : l.Gadgets, _account.UserId, out strength));
+                Log.Info("match: " + character + " at account level " + level + " with " + melee + "/" + ranged + ": strength " + strength + " -> infection level " + Game.MatchLevel);
             }
             catch (Exception e) { Log.Warn("match: infection level from strength failed, using 1: " + GameRuntime.Unwrap(e).Message); }
         }
 
         /// <summary>
         /// Scavenger's 11 bot heroes (3 teammates, 4 per rival team): random characters the hub lists with a model
-        /// (UnlockCatalog), never the human's. They are cached with the human's (CharactersToCache). Other modes
+        /// (UnlockCatalog), never the human's. They are cached with the human's (MatchInfo.HeroCache). Other modes
         /// cache only the human's hero.
         /// </summary>
         private void ChooseBotHeroes(bool scavenger)
         {
             Game.ExtraCharacters.Clear();
             if (!scavenger) return;
-            Type characterEnum = Game.GameManagerType.GetMethod("CacheGame", GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
+            Type characterEnum = Game.WorldType.GetMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
             var pool = (UnlockCatalog.Ready && UnlockCatalog.Characters.Length > 0 ? UnlockCatalog.Characters.Select(id => (int)id) : Enumerable.Range(1, 13))
                 .Where(id => Enum.IsDefined(characterEnum, id)).Select(id => Enum.GetName(characterEnum, id)).Where(n => n != Game.Character).ToList();
             Random r = new Random();
@@ -171,7 +172,7 @@ namespace EpidemicServer.Match
         {
             try
             {
-                int team = Scout != null ? Scout.TeamSupplies() : Horde != null ? Horde.Supplies : Scavenger != null ? Scavenger.DeliveredTeam1() : 0;
+                int team = Scout != null ? Scout.SuppliesBanked() : Horde != null ? Horde.Supplies : Scavenger != null ? Scavenger.DeliveredTeam1() : 0;
                 int xp = Leveling.EndMatch(_wantedQueue, Game.MapIndex, _account, boxes, team, placement);
                 if (xp < 0) return;
                 lock (_account)
@@ -211,7 +212,7 @@ namespace EpidemicServer.Match
             });
         }
 
-        /// <summary>A GameplayData frame from the attached client.</summary>
+        /// <summary>A MatchFrame frame from the attached client.</summary>
         public void OnClientFrame(byte[] frame)
         {
             Post(() => { if (_session != null) _session.OnClientFrame(frame); });
@@ -233,7 +234,7 @@ namespace EpidemicServer.Match
             Log.Info("match: loading the match client's game logic from " + _install);
             Game = GameRuntime.Load(_install);
             // Heroic Horde unlock (see RequestServerEncoders.HeroicUnlockXp).
-            RequestServerEncoders.HeroicUnlockXp = (uint)Game.Crafting("ConductorCrafting.AccountLevelHelpers").GetMethod("GetRequiredExperience", GameRuntime.All)
+            RequestServerEncoders.HeroicUnlockXp = (uint)R.Type("Type.Levels").GetMethod(R.Name("Levels.XpFor"), GameRuntime.All)
                 .Invoke(null, new object[] { RequestServerEncoders.HeroicUnlockLevel });
             RequestServerEncoders.FeatureAccount = _account;
             Log.Info("match: Heroic Horde unlocks at account level " + RequestServerEncoders.HeroicUnlockLevel + " (story map XP " + RequestServerEncoders.HeroicUnlockXp +
@@ -250,20 +251,20 @@ namespace EpidemicServer.Match
         /// <summary>True once a client has played the current match; the next one gets a fresh match.</summary>
         private bool _matchUsed;
 
-        /// <summary>Builds a fresh match: GameManager, network base, tutorial map and player 0.</summary>
+        /// <summary>Builds a fresh match: World, network base, tutorial map and player 0.</summary>
         private void BuildMatch()
         {
             Game.Start(line => Log.Info("match: " + line));
-            Log.Info("match: NumOfSynchronizables " + Game.NumOfSynchronizables + " (the match client logged 896 for the tutorial)");
+            Log.Info("match: SyncCount " + Game.SyncCount + " (the match client logged 896 for the tutorial)");
             DumpMapObjects();
 
             Log.Info("match: " + Game.SpawnPoints.Count + " spawn/teleport points in " + Game.MapName + ":");
             foreach (SpawnPoint s in Game.SpawnPoints) Log.Info("match:   " + s);
             Spawn = Game.PickSpawn();
-            if (Spawn == null) throw new Exception("no PlayerSpawnPoint or CinematicTeleportPoint in the map");
+            if (Spawn == null) throw new Exception("no MapKind.HeroStart or MapKind.CutsceneSpot in the map");
             Log.Info("match: spawning at " + Spawn);
 
-            bool tutorial = Game.GameModeType == GameRuntime.TutorialGameModeType;
+            bool tutorial = Game.ModeKind == GameRuntime.TutorialGameModeType;
             int level;
             Weapon melee = null, ranged = null;
             List<OwnedGadget> gadgets = new List<OwnedGadget>();
@@ -273,7 +274,7 @@ namespace EpidemicServer.Match
                 if (!tutorial)
                 {
                     // Outside the tutorial the client equips Weapon1/Weapon2 and the trinkets from the
-                    // hail's ClientInfoData (Client.OnGameManagerCreated, also run here on the server):
+                    // hail's ClientInfoObject (World.Created, also run here on the server):
                     // what the hub queued with (MatchLoadout), else the account's default melee and ranged weapons.
                     MatchLoadout l = MatchLoadout.Current;
                     melee = l != null && l.Melee != null ? ToWeapon(l.Melee) : AccountWeapon(Protocol.Inventory.DefaultMeleeSchematic);
@@ -284,14 +285,14 @@ namespace EpidemicServer.Match
             // The tutorial starts the player with her fists, as the original game does (the
             // owner's known-good hail had no weapons, and the client shows fists), so
             // no weapons go into her match client info there.
-            string team = tutorial ? GameRuntime.PlayerTeam : "Team1";
-            ClientInfoData = Game.BuildClientInfoData(DefaultCameraX, DefaultCameraY, _account.Name, team, level, melee, ranged, gadgets, _account.UserId);
+            string team = tutorial ? GameRuntime.PlayerTeam : R.Name("Team.One");
+            ClientInfoObject = Game.BuildClientInfoData(DefaultCameraX, DefaultCameraY, _account.Name, team, level, melee, ranged, gadgets, _account.UserId);
             if (_account.SteamId == 0) Log.Warn("match: no steamId in the account file; the hail will carry Steam id 0");
-            Player = Game.PrepareLocalPlayer(Spawn, ClientInfoData, _account.SteamId, _account.UserId, team, level);
-            Log.Info("match: " + Game.Character + ", account level " + level + " (story map XP " + _account.StoryMapXp + "), infection level " + Game.ServerLevel + ", team " + team +
+            Player = Game.PrepareLocalPlayer(Spawn, ClientInfoObject, _account.SteamId, _account.UserId, team, level);
+            Log.Info("match: " + Game.Character + ", account level " + level + " (story map XP " + _account.StoryMapXp + "), infection level " + Game.MatchLevel + ", team " + team +
                      (gadgets.Count == 0 ? "" : ", gadgets " + string.Join(",", gadgets.Select(g => g.GadgetId.ToString()).ToArray())) +
                      (melee == null ? ", no weapons in the hail" : ", weapons " + melee.SchematicId + "/" + ranged.SchematicId + " in the hail") +
-                     ", Weapon1 " + ServerHooks.Describe(ServerHooks.GetFieldValue(Player, "Weapon1")) + ", Weapon2 " + ServerHooks.Describe(ServerHooks.GetFieldValue(Player, "Weapon2")));
+                     ", Weapon1 " + ServerHooks.Describe(ServerHooks.GetFieldValue(Player, R.Name("Fighter.WeaponA"))) + ", Weapon2 " + ServerHooks.Describe(ServerHooks.GetFieldValue(Player, R.Name("Fighter.WeaponB"))));
             Leveling = new Leveling(Game, Player, line => Log.Info("match: " + line));
             Tutorial = null;
             Scout = null;
@@ -304,14 +305,14 @@ namespace EpidemicServer.Match
                 ServerHooks.AfterUpdate = Tutorial.Tick;
                 Tutorial.OnCompleted = () => { RecordTutorialCompleted(); EndMatch(new[] { 5, 10 }); };
             }
-            else if (Game.GameModeType == GameRuntime.ScavengerHuntGameModeType)
+            else if (Game.ModeKind == GameRuntime.ScavengerHuntGameModeType)
             {
                 Scavenger = new ScavengerDirector(Game, Player, line => Log.Info("match: " + line));
                 Scavenger.PopulateWorld(Game.ExtraCharacters, level, melee, ranged);
                 ServerHooks.AfterUpdate = Scavenger.Tick;
                 Scavenger.OnFinished = (placement, boxes) => EndMatch(boxes, placement);
             }
-            else if (Game.GameModeType == GameRuntime.HordeGameModeType)
+            else if (Game.ModeKind == GameRuntime.HordeGameModeType)
             {
                 Horde = new HordeDirector(Game, Player, line => Log.Info("match: " + line));
                 Horde.PopulateWorld();
@@ -329,17 +330,17 @@ namespace EpidemicServer.Match
             Leveling.Install();
             Log.Info("match: player 0 ready: synchronizable " + Game.SynchronizableIndex(Player) +
                      ", ability bar " + Game.SynchronizableIndex(Game.GetSynchronizable(Game.SynchronizableIndex(Player) + 1)) +
-                     ", game mode " + Game.SynchronizableIndex(Game.GameMode) + ", supplies " + (Game.Supplies == null ? "none" : Game.SynchronizableIndex(Game.Supplies).ToString()) +
-                     ", Health " + ServerHooks.GetStat(Player, "Health") + "/" + ServerHooks.GetStat(Player, "MaxHealth") +
+                     ", game mode " + Game.SynchronizableIndex(Game.ActiveMode) + ", supplies " + (Game.Supplies == null ? "none" : Game.SynchronizableIndex(Game.Supplies).ToString()) +
+                     ", Health " + ServerHooks.GetStat(Player, R.Name("Stat.Health")) + "/" + ServerHooks.GetStat(Player, R.Name("Stat.HealthMax")) +
                      ", tutorial stage " + Game.TutorialStage);
         }
 
-        /// <summary>Ends the current match: drops the session and shuts the GameManager down (on a server that resets it).</summary>
+        /// <summary>Ends the current match: drops the session and shuts the World down (on a server that resets it).</summary>
         private void TeardownMatch()
         {
             _session = null;
             ServerHooks.ResetMatchState();
-            Game.GameManagerType.GetMethod("Shutdown", GameRuntime.All, null, Type.EmptyTypes, null).Invoke(Game.GameManager, null);
+            Game.WorldType.GetMethod("Shutdown", GameRuntime.All, null, Type.EmptyTypes, null).Invoke(Game.World, null);
             Log.Info("match: previous match shut down");
         }
 
@@ -382,16 +383,16 @@ namespace EpidemicServer.Match
                                    : GameRuntime.ScoutMissionGameModeType;
                     int wantedDifficulty = _wantedQueue == 2 ? 1 : _wantedQueue == 3 ? 2 : 0;
                     string oldCharacter = Game.Character;
-                    int oldLevel = Game.ServerLevel;
+                    int oldLevel = Game.MatchLevel;
                     ChooseCharacterAndInfection(wantedMode == GameRuntime.TutorialGameModeType);
                     ChooseBotHeroes(wantedMode == GameRuntime.ScavengerHuntGameModeType);
-                    if (_matchUsed || wantedMode == GameRuntime.ScavengerHuntGameModeType || _wantedMap != Game.MapIndex || wantedMode != Game.GameModeType || wantedDifficulty != Game.Difficulty ||
-                        oldCharacter != Game.Character || oldLevel != Game.ServerLevel)
+                    if (_matchUsed || wantedMode == GameRuntime.ScavengerHuntGameModeType || _wantedMap != Game.MapIndex || wantedMode != Game.ModeKind || wantedDifficulty != Game.Difficulty ||
+                        oldCharacter != Game.Character || oldLevel != Game.MatchLevel)
                     {
                         Game.MapIndex = _wantedMap;
-                        Game.GameModeType = wantedMode;
-                        // HordeModeType in the hail and on the server: Normal (1) for ResistanceNormal, Heroic (2)
-                        // for ResistanceHard (the hub keeps Heroic locked below account level 20), else Easy (0).
+                        Game.ModeKind = wantedMode;
+                        // horde mode type in the hail and on the server: Normal (1) for resistance normal, Heroic (2)
+                        // for resistance hard (the hub keeps Heroic locked below account level 20), else Easy (0).
                         Game.Difficulty = wantedDifficulty;
                         // A new match client: start from a fresh match.
                         Log.Info("match: new match client; building a fresh match");
@@ -411,12 +412,12 @@ namespace EpidemicServer.Match
                     if (connection != null)
                     {
                         float[] camera = GameRuntime.Camera(connection);
-                        Game.SetCamera(ClientInfoData, camera[0], camera[1]);
-                        client.GetType().GetField("ClientConnectionData", GameRuntime.All).SetValue(client, connection);
+                        Game.SetCamera(ClientInfoObject, camera[0], camera[1]);
+                        client.GetType().GetField(R.Name("Net.Connection"), GameRuntime.All).SetValue(client, connection);
                         Log.Info("match: client camera direction (" + camera[0] + ", " + camera[1] + ") from its connect hail");
                     }
                     else Log.Warn("match: keeping the default camera direction (" + DefaultCameraX + ", " + DefaultCameraY + ")");
-                    result = MatchHail.Build(0, client, Game.BuildGameInfo(Game.ServerLevel, 1, 1800f));
+                    result = MatchHail.Build(0, client, Game.BuildGameInfo(Game.MatchLevel, 1, 1800f));
                 }
                 catch (Exception e) { error = GameRuntime.Unwrap(e); }
                 done.Set();

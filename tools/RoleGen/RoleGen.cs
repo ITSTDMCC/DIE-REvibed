@@ -1,6 +1,7 @@
 // RoleGen: builds server/src/Resolve/RoleTable.cs from a LOCAL role map and the player's installed game.
 //
-// The role map (one line per role: "Role | T|F|M | type | member | filter") names the game's current
+// The role map (one line per role: "Role | T|F|M | type | member | filter", or "Role | N | readable name")
+// names the game's current
 // identifiers, so it stays on the developer's machine (local/, git-ignored) and is never committed. RoleGen
 // fingerprints each role's type or member (see Fingerprint.cs), checks that every fingerprint points back to
 // exactly that type or member, and writes RoleTable.cs, which contains only role names and fingerprints.
@@ -33,8 +34,12 @@ public static class RoleGen
         Assembly[] asms = { Assembly.LoadFrom(Path.Combine(managed, "StunCore.dll")),
                             Assembly.LoadFrom(Path.Combine(managed, "ConductorCrafting.dll")),
                             Assembly.LoadFrom(Path.Combine(managed, "Assembly-CSharp.dll")) };
-        var byName = asms.ToDictionary(a => a.GetName().Name);
         var index = new FingerprintIndex(asms);
+        var names = new NameIndex(asms);
+        // The hub ("Crib") has its own copy of Assembly-CSharp; LoadFile keeps it apart from the match client's.
+        string crib = Path.Combine(install, @"Dead Island Epidemic - Crib_Data\Managed");
+        var cribNames = new NameIndex(new[] { Assembly.LoadFile(Path.Combine(crib, "Assembly-CSharp.dll")) });
+        var cribOnly = new List<string>();
 
         var rows = new List<KeyValuePair<string, string>>();
         int errors = 0;
@@ -44,6 +49,13 @@ public static class RoleGen
             if (line.Length == 0 || line.StartsWith("#")) continue;
             string[] p = line.Split('|').Select(x => x.Trim()).ToArray();
             string role = p[0], kind = p[1], typeName = p[2];
+            if (kind == "N")
+            {
+                string fpn = NameIndex.Print(typeName);
+                if (names.Name(fpn) == typeName) { rows.Add(new KeyValuePair<string, string>(role, fpn)); continue; }
+                if (cribNames.Name(fpn) == typeName) { rows.Add(new KeyValuePair<string, string>(role, fpn)); cribOnly.Add(role); continue; }
+                Console.WriteLine("ERROR " + role + ": name not found in the game's libraries"); errors++; continue;
+            }
             Type t = asms.Select(a => a.GetType(typeName)).FirstOrDefault(x => x != null);
             if (t == null) { Console.WriteLine("ERROR " + role + ": type not found"); errors++; continue; }
             string fp;
@@ -67,6 +79,9 @@ public static class RoleGen
             rows.Add(new KeyValuePair<string, string>(role, fp));
         }
         Console.WriteLine(rows.Count + " roles fingerprinted, " + errors + " errors");
+        if (cribOnly.Count > 0) Console.WriteLine("hub-only names (resolve only where R.Init gets the hub's libraries): " + string.Join(", ", cribOnly.ToArray()));
+        var dup = rows.GroupBy(r => r.Key).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (dup.Count > 0) { Console.WriteLine("ERROR duplicate roles: " + string.Join(", ", dup.ToArray())); return 1; }
         if (errors > 0) return 1;
 
         string outPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(typeof(RoleGen).Assembly.Location)), @"..\..\server\src\Resolve\RoleTable.cs");
@@ -92,6 +107,9 @@ public static class RoleGen
         s.AppendLine("        {");
         foreach (var r in rows) s.AppendLine("            { \"" + r.Key + "\", \"" + r.Value + "\" },");
         s.AppendLine("        };");
+        s.AppendLine();
+        s.AppendLine("        /// <summary>Roles found only in the hub's library; the match side doesn't check them.</summary>");
+        s.AppendLine("        public static readonly HashSet<string> HubOnly = new HashSet<string> { " + string.Join(", ", cribOnly.Select(r => "\"" + r + "\"").ToArray()) + " };");
         s.AppendLine("    }");
         s.AppendLine("}");
         File.WriteAllText(outPath, s.ToString());

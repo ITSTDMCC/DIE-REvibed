@@ -8,9 +8,9 @@ using EpidemicServer.Resolve;
 namespace EpidemicServer.Match
 {
     /// <summary>
-    /// The server side of the game's GameManager. The client build ships its
+    /// The server side of the game's World. The client build ships its
     /// server hooks as empty virtuals that return dummies, so nothing takes
-    /// damage; the emitted server GameManager overrides them and forwards here
+    /// damage; the emitted server World overrides them and forwards here
     /// (owner's design, step 3a, 2026-10-06). Everything runs on the game thread.
     /// </summary>
     public static class ServerHooks
@@ -37,7 +37,7 @@ namespace EpidemicServer.Match
         public static object Client0;
 
         /// <summary>Ability the AI attacks with; read from the NPC's ability bar slot 0 when spawned.</summary>
-        public static readonly Dictionary<object, object> AttackAbility = new Dictionary<object, object>();
+        public static readonly Dictionary<object, object> StrikeAbility = new Dictionary<object, object>();
 
         /// <summary>Per-NPC aggro range (static zombies idle until a player is close); default AggroRange.</summary>
         public static readonly Dictionary<object, float> AggroRange = new Dictionary<object, float>();
@@ -66,25 +66,25 @@ namespace EpidemicServer.Match
         /// <summary>When each NPC finishes getting up from its spawn pose (0 = awake from the start).</summary>
         public static readonly Dictionary<object, float> WakeUntil = new Dictionary<object, float>();
 
-        /// <summary>Runs after the AI in each GameManager update (the tutorial director), with the game time.</summary>
+        /// <summary>Runs after the AI in each World update (the tutorial director), with the game time.</summary>
         public static Action<float> AfterUpdate;
 
         public static void Init(GameRuntime g)
         {
             _g = g;
-            Handlers["ChangeStats"] = ChangeStats;
-            Handlers["ApplyStatEffect"] = ApplyStatEffect;
-            Handlers["ApplyBuff"] = ApplyBuff;
-            Handlers["SpawnGameObject"] = SpawnGameObject;
-            Handlers["GetVector2Change"] = GetVector2Change;
-            Handlers["SendSCT(Player)"] = SendSctToPlayer;
-            Handlers["SendSCT(IClient)"] = SendSctToClient;
-            Handlers["UpdateGameManager"] = UpdateGameManager;
-            Handlers["ControllerDataReceived"] = ControllerDataReceived;
-            Handlers["SendGameObjectDestroyed"] = SendGameObjectDestroyed;
+            Handlers[R.Name("Hook.StatChange")] = OnStatChange;
+            Handlers[R.Name("Hook.Effect")] = OnEffect;
+            Handlers[R.Name("Hook.Buff")] = OnBuff;
+            Handlers[R.Name("World.SpawnObject")] = HandleSpawn;
+            Handlers[R.Name("Hook.Push")] = OnPush;
+            Handlers[R.Name("Hook.FloatText") + "(" + R.Short("Type.Hero") + ")"] = SendSctToPlayer;
+            Handlers[R.Name("Hook.FloatText") + "(" + R.Short("Type.Peer") + ")"] = SendSctToClient;
+            Handlers[R.Name("Hook.Tick")] = OnTick;
+            Handlers[R.Name("Hook.Input")] = HandleInput;
+            Handlers[R.Name("Hook.Destroyed")] = OnDestroyed;
         }
 
-        /// <summary>The GameManager virtuals the server overrides.</summary>
+        /// <summary>The World virtuals the server overrides.</summary>
         /// <summary>Clears what belongs to one match (the session's queue, client, AI state).</summary>
         public static void ResetMatchState()
         {
@@ -92,7 +92,7 @@ namespace EpidemicServer.Match
             Client0 = null;
             OnKill = null;
             OnGameMessage = null;
-            AttackAbility.Clear();
+            StrikeAbility.Clear();
             AggroRange.Clear();
             WakeUntil.Clear();
             NavNext.Clear();
@@ -124,12 +124,12 @@ namespace EpidemicServer.Match
             foreach (MethodInfo m in gm.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly))
             {
                 if (!m.IsVirtual || m.IsFinal) continue;
-                string key = m.Name == "SendSCT" ? "SendSCT(" + m.GetParameters()[0].ParameterType.Name + ")" : m.Name;
+                string key = m.Name == R.Name("Hook.FloatText") ? m.Name + "(" + m.GetParameters()[0].ParameterType.Name + ")" : m.Name;
                 if (!Handlers.ContainsKey(key)) continue;
-                // UpdateGameManager keeps the game's own update and adds our AI after it.
-                hooks.Add(new HookedMethod { Method = m, Key = key, CallBaseFirst = m.Name == "UpdateGameManager" });
+                // OnTick keeps the game's own update and adds our AI after it.
+                hooks.Add(new HookedMethod { Method = m, Key = key, CallBaseFirst = m.Name == R.Name("Hook.Tick") });
             }
-            Log("server GameManager overrides: " + string.Join(", ", hooks.Select(h => h.Key).ToArray()));
+            Log("server World overrides: " + string.Join(", ", hooks.Select(h => h.Key).ToArray()));
             return hooks;
         }
 
@@ -138,7 +138,7 @@ namespace EpidemicServer.Match
         /// <summary>The first call of each hook is logged, to show which ones the game uses.</summary>
         public static object Dispatch(string key, object gm, object[] args)
         {
-            if (Called.Add(key) && key != "UpdateGameManager") Log("hook " + key + ": first call");
+            if (Called.Add(key) && key != R.Name("Hook.Tick")) Log("hook " + key + ": first call");
             try { return Handlers[key](gm, args); }
             catch (Exception e)
             {
@@ -149,35 +149,35 @@ namespace EpidemicServer.Match
 
         // ---- stats ----
 
-        private static object ChangeStats(object gm, object[] a)
+        private static object OnStatChange(object gm, object[] a)
         {
             object entity = a[0], statType = a[1], stackType = a[2], reason = a[4], changer = a[5], changeType = a[6], order = a[9];
             float value = (float)a[3];
-            if (DamageFilter != null && value < 0 && statType.ToString() == "Health") value = DamageFilter(entity, changer, value);
+            if (DamageFilter != null && value < 0 && statType.ToString() == R.Name("Stat.Health")) value = DamageFilter(entity, changer, value);
             bool pure = (bool)a[7], isPermanent = (bool)a[8], sendSct = (bool)a[10];
-            object stats = Field(entity, "Stats");
+            object stats = Field(entity, R.Name("Entity.StatBlock"));
             uint id = ++_statChangeId;
             float before = GetStat(entity, statType);
-            // StatContainer.Apply(stat, id, stack, reason, changeType, order, pure, isPermanent, value, changer, out tranced, out crit, out punctured, out blocked, out _)
+            // stat-container.Apply(stat, id, stack, reason, changeType, order, pure, isPermanent, value, changer, out tranced, out crit, out punctured, out blocked, out _)
             object[] call = { statType, id, stackType, reason, changeType, Convert.ToInt32(order), pure, isPermanent, value, changer, false, false, false, false, false };
-            float applied = (float)Method(stats, R.Name("StatContainer.Apply")).Invoke(stats, call);
+            float applied = (float)Method(stats, R.Name("Stats.Apply")).Invoke(stats, call);
             bool tranced = (bool)call[10], crit = (bool)call[11], punctured = (bool)call[12], blocked = (bool)call[13];
-            int changerId = changer == null ? -1 : (ushort)Prop(changer, "IndexGlobal");
+            int changerId = changer == null ? -1 : (ushort)Prop(changer, R.Name("Entity.GlobalIndex"));
             object result = R.Type("StatChangeRecord").GetConstructors(All).First(c => c.GetParameters().Length == 10).Invoke(new object[]
-                { statType, (ushort)Prop(entity, "IndexEntity"), id, changerId, isPermanent, applied, tranced, crit, punctured, blocked });
+                { statType, (ushort)Prop(entity, R.Name("Entity.LocalIndex")), id, changerId, isPermanent, applied, tranced, crit, punctured, blocked });
             if (_statChangeId <= 40)
-                Log("ChangeStats #" + id + " " + Describe(entity) + " " + statType + " " + value + " -> applied " + applied + " (now " + GetStat(entity, statType) +
+                Log("OnStatChange #" + id + " " + Describe(entity) + " " + statType + " " + value + " -> applied " + applied + " (now " + GetStat(entity, statType) +
                     ", pure " + pure + ", permanent " + isPermanent + ", reason " + reason + ", type " + changeType + ")");
-            else if (statType.ToString() == "Health" && value != 0)
-                Log("ChangeStats " + Describe(entity) + " Health " + before + " -> " + GetStat(entity, statType) + " (" + value + (changer != null ? " from " + Describe(changer) : "") + ")");
+            else if (statType.ToString() == R.Name("Stat.Health") && value != 0)
+                Log("OnStatChange " + Describe(entity) + " Health " + before + " -> " + GetStat(entity, statType) + " (" + value + (changer != null ? " from " + Describe(changer) : "") + ")");
             // Combat text only for health and shield, and not for an entity's own spawn and
-            // setup changes (they showed as a green "60" over zombies: RotationSpeed +60).
+            // setup changes (they showed as a green "60" over zombies: rotation speed +60).
             string statName = statType.ToString();
-            bool showText = (statName == "Health" || statName == "Shield") && changer != entity;
+            bool showText = (statName == R.Name("Stat.Health") || statName == R.Name("Stat.Shield")) && changer != entity;
             if (sendSct && showText && value != 0) SendDamageText(entity, changer, statType, before, applied, crit, punctured, blocked, tranced, reason, changeType);
             // A kill: a character's health crosses to zero. The killer is the character behind the changer.
-            if (OnKill != null && statName == "Health" && before > 0f && GetStat(entity, statType) <= 0f &&
-                _g.Game("ConductorGameLogic.Entities.Character").IsInstanceOfType(entity))
+            if (OnKill != null && statName == R.Name("Stat.Health") && before > 0f && GetStat(entity, statType) <= 0f &&
+                R.Type("Type.Fighter").IsInstanceOfType(entity))
             {
                 try { OnKill(entity, changer); }
                 catch (Exception e) { Log("kill handling failed: " + GameRuntime.Unwrap(e)); }
@@ -192,10 +192,10 @@ namespace EpidemicServer.Match
         public static Func<int, GameBuffer, bool> OnGameMessage;
 
         /// <summary>
-        /// Queues a reliable game message to the client: 1, ConductorGameMessageType.GameMessage (0),
-        /// the GameMessageType, then the body (the layout the server's other messages use).
+        /// Queues a reliable game message to the client: 1, conductor-game-message-type.MatchMessage (0),
+        /// the game message type, then the body (the layout the server's other messages use).
         /// </summary>
-        public static bool SendGameMessage(int type, Action<GameBuffer> body)
+        public static bool SendMatchMessage(int type, Action<GameBuffer> body)
         {
             if (QueueReliable == null) return false;
             GameBuffer m = GameBuffer.Create();
@@ -207,59 +207,59 @@ namespace EpidemicServer.Match
             return true;
         }
 
-        private static object ApplyStatEffect(object gm, object[] a)
+        private static object OnEffect(object gm, object[] a)
         {
             object changer = a[0], entity = a[1], type = a[2];
             uint id = ++_statChangeId;
-            int changerId = changer != null && _g.Game("ConductorGameLogic.Entities.GameObjectBase").IsInstanceOfType(changer) ? (ushort)Prop(changer, "IndexGlobal") : -1;
-            object change = _g.Game("ConductorGameLogic.Stats.StatEffectChange").GetConstructors(All).First(c => c.GetParameters().Length == 4)
-                .Invoke(new object[] { type, (ushort)Prop(entity, "IndexEntity"), id, changerId });
+            int changerId = changer != null && R.Type("Type.WorldObject").IsInstanceOfType(changer) ? (ushort)Prop(changer, R.Name("Entity.GlobalIndex")) : -1;
+            object change = R.Type("Type.EffectChange").GetConstructors(All).First(c => c.GetParameters().Length == 4)
+                .Invoke(new object[] { type, (ushort)Prop(entity, R.Name("Entity.LocalIndex")), id, changerId });
             a[3] = change;
             if (TraceControl) Log("trace stat effect " + type + " changer " + Describe(changer) + " on " + Describe(entity));
             if (ControlEffects.Contains(type.ToString()) && Blocked(changer, entity, "stat effect " + type)) return null;
-            object container = Field(entity, "StatEffects");
+            object container = Field(entity, R.Name("Entity.Effects"));
             object[] call = { change };
-            Method(container, R.Name("StatEffectContainer.Add")).Invoke(container, call);
+            Method(container, R.Name("Effects.Add")).Invoke(container, call);
             a[3] = call[0];
             return null;
         }
 
-        private static object ApplyBuff(object gm, object[] a)
+        private static object OnBuff(object gm, object[] a)
         {
             object buff = a[0], target = a[1], owner = a[2];
             if (buff == null || target == null)
             {
-                Log("ApplyBuff: skipped, " + (buff == null ? "no buff (pool empty?)" : "buff " + Describe(buff)) + ", target " + Describe(target) + ", owner " + Describe(owner));
+                Log("OnBuff: skipped, " + (buff == null ? "no buff (pool empty?)" : "buff " + Describe(buff)) + ", target " + Describe(target) + ", owner " + Describe(owner));
                 return Enum.ToObject(R.Type("BuffResult"), 0);
             }
             if (TraceControl) Log("trace buff " + Describe(buff) + " owner " + Describe(owner) + " target " + Describe(target) + " ability " + AbilityName(buff) + " / owner's " + AbilityName(owner) + " via " + GameFrames());
             if (BlockControl != null && owner != null && BlockControl(RootOwner(owner), target))
             {
-                // The melee knockback-stun buff (role Buff.KnockbackStun): WeakKnockbackStun stat effect, knockback
+                // The melee knockback-stun buff (role Effect.KnockStun): Effect.LightKnockStun stat effect, knockback
                 // vector and the stagger animation, synced to the client. Drop it whole (the hit's
-                // damage is a separate ChangeStats). Other buffs are kept and logged.
-                bool control = buff.GetType().Name == R.Short("Buff.KnockbackStun");
+                // damage is a separate OnStatChange). Other buffs are kept and logged.
+                bool control = buff.GetType().Name == R.Short("Buff.Stagger");
                 if (_blockedLogged.Add("buff " + buff.GetType().Name))
-                    Log("ApplyBuff: " + Describe(buff) + " from " + Describe(owner) + " on " + Describe(target) + (control ? " dropped (knockback-stun buff)" : " kept") + " (logged once per type)");
+                    Log("OnBuff: " + Describe(buff) + " from " + Describe(owner) + " on " + Describe(target) + (control ? " dropped (knockback-stun buff)" : " kept") + " (logged once per type)");
                 if (control)
                 {
-                    // The buff came out of the game's pool (GetAndApplyBuffFromPool); hand it back, or the pool runs
+                    // The buff came out of the game's pool (World.PooledEffect); hand it back, or the pool runs
                     // dry and every later knockback hit throws inside the game's hit code (2026-10-07 playtest: from
                     // about 6 minutes in, "No GameObject in pool" for that buff on each hit, zombies dying seconds late).
-                    try { _g.GameManagerType.GetMethod("ReturnGameObjectToPool", All).Invoke(_g.GameManager, new[] { buff }); }
-                    catch (Exception e) { if (_poolReturnLogged++ < 3) Log("ApplyBuff: could not return " + Describe(buff) + " to the pool: " + GameRuntime.Unwrap(e).Message); }
+                    try { _g.WorldType.GetMethod(R.Name("World.Recycle"), All).Invoke(_g.World, new[] { buff }); }
+                    catch (Exception e) { if (_poolReturnLogged++ < 3) Log("OnBuff: could not return " + Describe(buff) + " to the pool: " + GameRuntime.Unwrap(e).Message); }
                     return Enum.ToObject(R.Type("BuffResult"), 0);
                 }
             }
             buff.GetType().GetProperty("Target", All).SetValue(buff, target, null);
             if (owner != null) Method(buff, "SetOwner").Invoke(buff, new[] { owner });
-            Method(target, "AddBuff").Invoke(target, new[] { buff });
-            try { Method(buff, "Spawn", Type.EmptyTypes).Invoke(buff, null); }
+            Method(target, R.Name("Entity.AddEffect")).Invoke(target, new[] { buff });
+            try { Method(buff, R.Name("Entity.Appear"), Type.EmptyTypes).Invoke(buff, null); }
             catch (TargetInvocationException e)
             {
                 // e.g. the supply-carry buff touches a view effect that the server doesn't have.
                 if (_buffSetupLogged.Add(buff.GetType().Name))
-                    Log("ApplyBuff: " + Describe(buff) + "'s own setup threw " + GameRuntime.Unwrap(e).GetType().Name + " (kept the buff; logged once per type)");
+                    Log("OnBuff: " + Describe(buff) + "'s own setup threw " + GameRuntime.Unwrap(e).GetType().Name + " (kept the buff; logged once per type)");
             }
             // Return the success value of the buff result enum (role BuffResult; taken as 0 until confirmed).
             return Enum.ToObject(R.Type("BuffResult"), 0);
@@ -268,10 +268,10 @@ namespace EpidemicServer.Match
         private static int _spawnsLogged;
         private static readonly HashSet<string> _buffSetupLogged = new HashSet<string>();
 
-        /// <summary>The last objects spawned through SpawnGameObject (for diagnostics).</summary>
+        /// <summary>The last objects spawned through HandleSpawn (for diagnostics).</summary>
         public static readonly List<object> RecentSpawns = new List<object>();
 
-        private static object SpawnGameObject(object gm, object[] a)
+        private static object HandleSpawn(object gm, object[] a)
         {
             object obj = a[0], owner = a[1];
             RecentSpawns.Add(obj);
@@ -280,27 +280,27 @@ namespace EpidemicServer.Match
             {
                 // Spells spawn Neutral, and the hit test compares the spell's own team
                 // with the target's: give the spell its owner's team first.
-                PropertyInfo team = obj.GetType().GetProperty("TeamId", All);
+                PropertyInfo team = obj.GetType().GetProperty(R.Name("Entity.Team"), All);
                 team.SetValue(obj, team.GetValue(owner, null), null);
                 Method(obj, "SetOwner").Invoke(obj, new[] { owner });
             }
-            // GetAndSpawnGameObjectFromPool only fetches the object and calls this hook;
-            // Spawn() itself calls the object's own SpawnGameObject(), never this one.
+            // get and spawn game object from pool only fetches the object and calls this hook;
+            // Spawn() itself calls the object's own HandleSpawn(), never this one.
             // So the server spawns it here, or spells stay inactive and never hit.
             bool spawned = false;
             if (!(bool)Prop(obj, "IsActive"))
             {
-                Method(obj, "Spawn", Type.EmptyTypes).Invoke(obj, null);
+                Method(obj, R.Name("Entity.Appear"), Type.EmptyTypes).Invoke(obj, null);
                 spawned = true;
             }
-            if (_spawnsLogged++ < 10) Log("spawn " + Describe(obj) + " owner " + Describe(owner) + " team " + Prop(obj, "TeamId") + (spawned ? "" : " (already active)"));
-            if (owner != null && _g.Game("ConductorGameLogic.Entities.Player").IsInstanceOfType(owner) && _playerSpellsLogged++ < 20)
+            if (_spawnsLogged++ < 10) Log("spawn " + Describe(obj) + " owner " + Describe(owner) + " team " + Prop(obj, R.Name("Entity.Team")) + (spawned ? "" : " (already active)"));
+            if (owner != null && R.Type("Type.Hero").IsInstanceOfType(owner) && _playerSpellsLogged++ < 20)
                 LogAim(obj, owner);
             return null;
         }
 
         /// <summary>Knockback: apply the direction to the owner's prioritized vector.</summary>
-        private static object GetVector2Change(object gm, object[] a)
+        private static object OnPush(object gm, object[] a)
         {
             object vector = a[0], direction = a[1], owner = a[2], priority = a[5];
             Type changeType = R.Type("StatEffectChangeList");
@@ -323,21 +323,21 @@ namespace EpidemicServer.Match
                                            bool crit, bool punctured, bool blocked, bool tranced, object reason, object changeType)
         {
             if (Client0 == null) return;
-            Type t = _g.Game("ConductorGameLogic.SCTData");
+            Type t = R.Type("Type.FloatingText");
             object data = Activator.CreateInstance(t);
-            Set(data, "StatType", statType);
-            Set(data, "StartValue", before);
+            Set(data, R.Name("Stat.Kind"), statType);
+            Set(data, R.Name("Stat.Start"), before);
             Set(data, "Value", applied);
-            Set(data, "IsCrit", crit);
-            Set(data, "IsPunctured", punctured);
-            Set(data, "IsBlocked", blocked);
-            Set(data, "IsTranced", tranced);
-            Set(data, "IsKillingBlow", (bool)Prop(entity, "IsDead"));
-            Set(data, "ShowHitEffect", true);
-            Set(data, "StatChangeReason", reason);
-            Set(data, "StatChangeType", changeType);
-            object owner = changer == null ? null : _g.Game("ConductorGameLogic.Entities.Entity").IsInstanceOfType(changer) ? changer : Prop(changer, "Owner");
-            SendSctToClient(_g.GameManager, new[] { Client0, entity, owner, changer, data });
+            Set(data, R.Name("Text.Crit"), crit);
+            Set(data, R.Name("Text.Pierce"), punctured);
+            Set(data, R.Name("Text.Block"), blocked);
+            Set(data, R.Name("Text.Trance"), tranced);
+            Set(data, R.Name("Text.Kill"), (bool)Prop(entity, R.Name("Entity.Dead")));
+            Set(data, R.Name("Text.HitFx"), true);
+            Set(data, R.Name("Stat.Reason"), reason);
+            Set(data, R.Name("Stat.ChangeKind"), changeType);
+            object owner = changer == null ? null : R.Type("Type.Entity").IsInstanceOfType(changer) ? changer : Prop(changer, "Owner");
+            SendSctToClient(_g.World, new[] { Client0, entity, owner, changer, data });
         }
 
         private static object SendSctToPlayer(object gm, object[] a)
@@ -347,13 +347,13 @@ namespace EpidemicServer.Match
 
         private static object SendSctToClient(object gm, object[] a)
         {
-            object sct = _g.GameManagerType.GetField("_SCTSynchronizer", All).GetValue(gm);
+            object sct = _g.WorldType.GetField(R.Name("Text.Sync"), All).GetValue(gm);
             if (sct == null) return null;
-            Method(sct, "SendSCT").Invoke(sct, a);
+            Method(sct, R.Name("Hook.FloatText")).Invoke(sct, a);
             if (!_sctLogged)
             {
                 _sctLogged = true;
-                Log("combat text: first SendSCT to client 0 for " + Describe(a[1]));
+                Log("combat text: first floating text to client 0 for " + Describe(a[1]));
             }
             return null;
         }
@@ -364,15 +364,15 @@ namespace EpidemicServer.Match
         private static void LogAim(object spell, object player)
         {
             float[] p = Position(player);
-            float[] aim = Vector(Prop(player, "AimDirection"));
-            float[] target = Vector(Field(player, "TargetAimDirection"));
+            float[] aim = Vector(Prop(player, R.Name("Fighter.Aim")));
+            float[] target = Vector(Field(player, R.Name("Fighter.AimGoal")));
             string mouse = "";
             try { mouse = ", mouse " + Prop(player, "MousePosition"); } catch (Exception) { }
             string nearest = "no NPC";
             float best = float.MaxValue;
-            foreach (object npc in (Array)_g.GameManagerType.GetField("_NPCList", All).GetValue(_g.GameManager))
+            foreach (object npc in (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(_g.World))
             {
-                if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, "IsDead")) continue;
+                if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, R.Name("Entity.Dead"))) continue;
                 float[] n = Position(npc);
                 float dx = n[0] - p[0], dy = n[1] - p[1], d = (float)Math.Sqrt(dx * dx + dy * dy);
                 if (d >= best) continue;
@@ -392,8 +392,8 @@ namespace EpidemicServer.Match
 
         /// <summary>
         /// Set by a director to put every synchronizable in this tick's frame (MatchSession clears it). Used when a
-        /// reliable message depends on synced state: the client's HUD drops the victory screen that TeamFinished
-        /// opened on any frame where GameMode.IsCompleted isn't true yet (UI_HUDBinding.Update), so the end
+        /// reliable message depends on synced state: the client's HUD drops the victory screen that team finished
+        /// opened on any frame where ActiveMode.IsCompleted isn't true yet (UI-HUD-binding.Update), so the end
         /// messages must arrive in the same frame as the IsCompleted sync (2026-10-07: the Scavenger end screen
         /// flashed and vanished).
         /// </summary>
@@ -405,28 +405,28 @@ namespace EpidemicServer.Match
         /// <summary>
         /// GM.Update passes every destroyed object to this hook for each client that
         /// has seen it (owner's design, step 3c). The message: byte 1 (game
-        /// message), byte 0 (GameMessage), byte 21 (GameObjectDestroyed), the spawn
+        /// message), byte 0 (MatchMessage), byte 21 (game object destroyed), the spawn
         /// id as this client knows it (ranged 0..3), the object's global index
-        /// (ranged 0..NumberOfGameObjects), then the object's own SerializeDestroy
+        /// (ranged 0..World.ObjectCount), then the object's own World.WriteDestroy
         /// (for an NPC: IsDead and its killer), so the client plays the death.
         /// </summary>
-        private static object SendGameObjectDestroyed(object gm, object[] a)
+        private static object OnDestroyed(object gm, object[] a)
         {
             object client = a[0], obj = a[1];
             if (QueueReliable == null) return null;
             int clientIndex = (int)Prop(client, "Index");
-            ushort global = (ushort)Prop(obj, "IndexGlobal");
-            object spawnDatas = gm.GetType().GetProperty("SpawnDatas", All).GetValue(gm, null);
+            ushort global = (ushort)Prop(obj, R.Name("Entity.GlobalIndex"));
+            object spawnDatas = gm.GetType().GetProperty(R.Name("World.SpawnTable"), All).GetValue(gm, null);
             int spawnId = (int)spawnDatas.GetType().GetMethod(R.Name("SpawnData.NextSpawnId"), All, null, new[] { typeof(int), typeof(int) }, null)
                 .Invoke(spawnDatas, new object[] { (int)global, clientIndex });
-            int objects = (int)gm.GetType().GetProperty("NumberOfGameObjects", All).GetValue(gm, null);
+            int objects = (int)gm.GetType().GetProperty(R.Name("World.ObjectCount"), All).GetValue(gm, null);
             GameBuffer m = GameBuffer.Create();
             m.Write((byte)1);
             m.Write((byte)0);
             m.Write((byte)21);
             m.WriteRanged(0, 3, spawnId);
             m.WriteRanged(0, objects, global);
-            Method(obj, "SerializeDestroy").Invoke(obj, new[] { m.Buffer, client });
+            Method(obj, R.Name("World.WriteDestroy")).Invoke(obj, new[] { m.Buffer, client });
             QueueReliable(m.Buffer);
             DestroyMessages++;
             Log("destroy message for " + Describe(obj) + " (spawn id " + spawnId + ") to client " + clientIndex + ": " + BitConverter.ToString(m.ToBytes()));
@@ -449,17 +449,18 @@ namespace EpidemicServer.Match
         /// </summary>
         public static Func<object, object, bool> BlockControl;
 
-        /// <summary>StatEffectType names that take control away from the target.</summary>
-        private static readonly HashSet<string> ControlEffects = new HashSet<string> {
-            "Stun", "Disarm", "Silence", "Disabled", "GameplayLocked", "MovementImpair", "Control", "Blind",
-            "KnockbackStun", "Taunt", "MegaStun", "WeakKnockbackStun", "Constrain", "InvertedXMovement", "InvertedYMovement" };
+        /// <summary>stat effect type names that take control away from the target.</summary>
+        private static HashSet<string> _controlEffects;
+        private static HashSet<string> ControlEffects { get { return _controlEffects ?? (_controlEffects = new HashSet<string> {
+            R.Name("Effect.Stun"), R.Name("Effect.Disarm"), R.Name("Effect.Silence"), "Disabled", R.Name("Effect.Locked"), R.Name("Effect.Slow"), "Control", R.Name("Effect.Blind"),
+            R.Name("Effect.KnockStun"), R.Name("Effect.Taunt"), R.Name("Effect.BigStun"), R.Name("Effect.LightKnockStun"), R.Name("Effect.Bind"), R.Name("Effect.FlipX"), R.Name("Effect.FlipY") }); } }
         private static readonly HashSet<string> _blockedLogged = new HashSet<string>();
         private static int _poolReturnLogged;
 
         /// <summary>Follows Owner from a buff or spell up to the character behind it.</summary>
         public static object RootOwner(object o)
         {
-            Type character = _g.Game("ConductorGameLogic.Entities.Character");
+            Type character = R.Type("Type.Fighter");
             for (int i = 0; i < 6 && o != null; i++)
             {
                 if (character.IsInstanceOfType(o)) return o;
@@ -477,8 +478,8 @@ namespace EpidemicServer.Match
         public static bool TraceControl;
 
         /// <summary>
-        /// The weapon-primary hit object on the current stack, or null: role Hit.MeleePrimary (LightPrimary,
-        /// HeavyPrimary, FistsPrimary) or Hit.RangedPrimary (PistolsPrimary, ShotgunPrimary, 142), per the
+        /// The weapon-primary hit object on the current stack, or null: role Hit.MeleePrimary (Ability.LightFirst,
+        /// Ability.HeavyFirst, fists primary) or Hit.RangedPrimary (pistols primary, Ability.GunFirst, 142), per the
         /// game's ability registrations. Used to tell a basic attack's knockback-stun from an ability's.
         /// </summary>
         public static string BasicAttackHitOnStack()
@@ -507,14 +508,14 @@ namespace EpidemicServer.Match
                                            .Take(6).Select(m => m.DeclaringType.FullName + "::" + m.Name).ToArray());
         }
 
-        /// <summary>The AbilityIdentifier of the ability an object came from (GameObjectBase.OwnerAbility), or "-".</summary>
+        /// <summary>The Ability.Key of the ability an object came from (Spell.Ability), or "-".</summary>
         public static string AbilityName(object o)
         {
             if (o == null) return "-";
-            PropertyInfo p = o.GetType().GetProperty("OwnerAbility", All);
+            PropertyInfo p = o.GetType().GetProperty(R.Name("Spell.Ability"), All);
             object a = p == null ? null : p.GetValue(o, null);
             if (a == null) return "-";
-            PropertyInfo id = a.GetType().GetProperty("AbilityIdentifier", All);
+            PropertyInfo id = a.GetType().GetProperty(R.Name("Ability.Key"), All);
             return id == null ? a.GetType().Name : id.GetValue(a, null).ToString();
         }
 
@@ -546,11 +547,11 @@ namespace EpidemicServer.Match
 
         /// <summary>
         /// Called with each client frame's controller data, just before the game's
-        /// own Character.ServerSetControllerData. Logs the int and bool fields
+        /// own server set controller data. Logs the int and bool fields
         /// (ability id, use id, ...) whenever they change, to see what the
         /// client asks for.
         /// </summary>
-        private static object ControllerDataReceived(object gm, object[] a)
+        private static object HandleInput(object gm, object[] a)
         {
             object data = a[1];
             if (data == null) return null;
@@ -559,7 +560,7 @@ namespace EpidemicServer.Match
                 if ((f.FieldType == typeof(int) || f.FieldType == typeof(bool) || f.FieldType.IsEnum) && !FrameCounters.Contains(f.Name))
                     parts.Add(f.Name + "=" + f.GetValue(data));
             // A self-cast press (rising edge): what the player's X presses at the supply point arrive as.
-            FieldInfo selfCast = data.GetType().GetField(R.Name("ControllerData.SelfCast"), All);
+            FieldInfo selfCast = data.GetType().GetField(R.Name("ControllerData.CastOnSelf"), All);
             bool sc = selfCast != null && (bool)selfCast.GetValue(data);
             if (sc && !_lastSelfCast && SelfCastPressed != null) SelfCastPressed();
             _lastSelfCast = sc;
@@ -574,10 +575,10 @@ namespace EpidemicServer.Match
                     try
                     {
                         object player = _g.GetPlayer(0);
-                        object bar = Prop(player, "AbilityBar");
-                        object ability = bar.GetType().GetMethods(All).First(m => m.Name == "GetCachedAbility" && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int)).Invoke(bar, new object[] { index });
-                        if (ability == null || !"HeavyPrimary,HeavySecondary,LightPrimary,ShotgunPrimary,Dash".Contains(Prop(ability, "AbilityIdentifier").ToString()))
-                            Log("ability press: cached " + index + " = " + (ability == null ? "(none)" : Prop(ability, "AbilityIdentifier") + " in slot " + ability.GetType().GetField("SlotIndex", All).GetValue(ability)) +
+                        object bar = Prop(player, R.Name("Fighter.Bar"));
+                        object ability = bar.GetType().GetMethods(All).First(m => m.Name == R.Name("Bar.Cached") && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int)).Invoke(bar, new object[] { index });
+                        if (ability == null || !new[] { R.Name("Ability.HeavyFirst"), R.Name("Ability.HeavySecond"), R.Name("Ability.LightFirst"), R.Name("Ability.GunFirst"), "Dash" }.Contains(Prop(ability, R.Name("Ability.Key")).ToString()))
+                            Log("ability press: cached " + index + " = " + (ability == null ? "(none)" : Prop(ability, R.Name("Ability.Key")) + " in slot " + ability.GetType().GetField(R.Name("Bar.Slot"), All).GetValue(ability)) +
                                 ", player at (" + string.Join(", ", Position(player).Select(v => v.ToString("0")).ToArray()) + ")" + (PressNote == null ? "" : ", " + PressNote()));
                     }
                     catch (Exception e) { Log("ability press: cached " + index + " (" + GameRuntime.Unwrap(e).Message + ")"); }
@@ -594,8 +595,8 @@ namespace EpidemicServer.Match
 
         // ---- AI ----
 
-        /// <summary>Runs after the game's own UpdateGameManager: chase and hit the player.</summary>
-        private static object UpdateGameManager(object gm, object[] a)
+        /// <summary>Runs after the game's own OnTick: chase and hit the player.</summary>
+        private static object OnTick(object gm, object[] a)
         {
             _time = (float)a[1];
             try { RunAi(gm); RunPets(gm); }
@@ -605,19 +606,19 @@ namespace EpidemicServer.Match
 
         /// <summary>
         /// A zombie in a spawn pose (sitting, lying, ...) can't move until its spawn state
-        /// is 0 (Character.UpdateEntity and NPC.ChangeDirection check it), and only the
+        /// is 0 (update entity and change direction check it), and only the
         /// server clears it. Clearing it makes the NPC play its get-up animation and set
-        /// SpawnAnimationDuration; it may act once that has passed. False while getting up.
+        /// Npc.RiseTime; it may act once that has passed. False while getting up.
         /// </summary>
         private static bool WakeUp(object npc)
         {
             float until;
             if (WakeUntil.TryGetValue(npc, out until)) return _time >= until;
-            PropertyInfo state = npc.GetType().GetProperty("SpawnState_Current", All);
+            PropertyInfo state = npc.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
             if (state == null || Convert.ToInt32(state.GetValue(npc, null)) == 0) { WakeUntil[npc] = 0f; return true; }
             object from = state.GetValue(npc, null);
             state.SetValue(npc, Enum.ToObject(state.PropertyType, 0), null);
-            FieldInfo d = npc.GetType().GetField("SpawnAnimationDuration", All);
+            FieldInfo d = npc.GetType().GetField(R.Name("Npc.RiseTime"), All);
             float duration = d == null ? 0f : (float)d.GetValue(npc);
             WakeUntil[npc] = _time + duration;
             Log("AI: " + Describe(npc) + " wakes from spawn state " + from + ", getting up for " + duration + " s");
@@ -629,13 +630,13 @@ namespace EpidemicServer.Match
         /// way: if the collision tree says the straight line is blocked
         /// (CollisionTree.LineBlocked with flags 37), ask the navmesh pathfinder (PathFinder.Find, 2000
         /// iterations) and head for the edge midpoint about 100 units along the path; else
-        /// go straight. The NPC's own goal-position mode (Npc.UseGoalPosition, Npc.GoalPosition) does the walking.
+        /// go straight. The NPC's own goal-position mode (Npc.UseGoalPosition, goal position) does the walking.
         /// Recomputed every NavRecompute s.
         /// </summary>
         public static void Steer(object npc, object target)
         {
             Type t = npc.GetType();
-            t.GetProperty("GoalTarget", All).SetValue(npc, target, null);
+            t.GetProperty(R.Name("Npc.Target"), All).SetValue(npc, target, null);
             float next;
             if (!NavNext.TryGetValue(npc, out next) || _time >= next)
             {
@@ -658,12 +659,12 @@ namespace EpidemicServer.Match
             if (w == null)
             {
                 SetField(npc, R.Name("Npc.UseGoalPosition"), false);
-                t.GetProperty("UseGoalTarget", All).SetValue(npc, true, null);
+                t.GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, true, null);
             }
             else
             {
-                t.GetProperty("UseGoalTarget", All).SetValue(npc, false, null);
-                SetField(npc, R.Name("Npc.GoalPosition"), _g.Vector2(w[0], w[1]));
+                t.GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
+                SetField(npc, R.Name("Npc.GoalPoint"), _g.Vector2(w[0], w[1]));
                 SetField(npc, R.Name("Npc.UseGoalPosition"), true);
             }
         }
@@ -693,8 +694,8 @@ namespace EpidemicServer.Match
         /// <summary>Stops an NPC that is steering (no goal target, no goal position).</summary>
         public static void StopSteering(object npc)
         {
-            npc.GetType().GetProperty("UseGoalTarget", All).SetValue(npc, false, null);
-            npc.GetType().GetProperty("GoalTarget", All).SetValue(npc, null, null);
+            npc.GetType().GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
+            npc.GetType().GetProperty(R.Name("Npc.Target"), All).SetValue(npc, null, null);
             SetField(npc, R.Name("Npc.UseGoalPosition"), false);
             NavWaypoint.Remove(npc);
             NavNext.Remove(npc);
@@ -708,8 +709,8 @@ namespace EpidemicServer.Match
         /// <summary>True when the collision tree says the straight line between two points is clear (same check as Waypoint).</summary>
         public static bool LineClear(float[] from, float[] to)
         {
-            object gm = _g.GameManager;
-            object collision = _g.GameManagerType.GetField("CollisionManager", All).GetValue(gm);
+            object gm = _g.World;
+            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
             object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
             if (_lineCheck == null) _lineCheck = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
@@ -724,14 +725,14 @@ namespace EpidemicServer.Match
         /// </summary>
         public static List<float[]> Path(float[] from, float[] to, int iterations, bool force = false)
         {
-            object gm = _g.GameManager;
-            object collision = _g.GameManagerType.GetField("CollisionManager", All).GetValue(gm);
+            object gm = _g.World;
+            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
             object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
             MethodInfo blockedM = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
             bool blocked = (bool)blockedM.Invoke(tree, new[] { a, b, Enum.ToObject(blockedM.GetParameters()[2].ParameterType, 37), (object)false, true, false });
             if (!blocked && !force) return new List<float[]>();
-            object nav = _g.GameManagerType.GetProperty("NavMesh", All).GetValue(gm, null);
+            object nav = _g.WorldType.GetProperty("NavMesh", All).GetValue(gm, null);
             Type finder = R.Type("PathFinder");
             MethodInfo find = finder.GetMethods(All).First(m => m.Name == R.Name("PathFinder.Find") && m.GetParameters().Length == 5 && m.GetParameters()[0].ParameterType == a.GetType());
             object node = find.Invoke(null, new[] { a, b, nav, null, (object)iterations });
@@ -743,7 +744,7 @@ namespace EpidemicServer.Match
             {
                 object e = edge.GetValue(n, null);
                 if (e == null) continue;
-                float[] mid = Vector(e.GetType().GetField(R.Name("NavMeshEdge.Mid"), All).GetValue(e));
+                float[] mid = Vector(e.GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(e));
                 if (mid[0] != 0 || mid[1] != 0) points.Add(mid);
             }
             // The returned node's chain runs from the start end toward the goal (probe: first midpoints near
@@ -754,14 +755,14 @@ namespace EpidemicServer.Match
         /// <summary>As Waypoint, with the pathfinder's iteration budget (bots crossing a whole Scavenger map need more).</summary>
         public static float[] Waypoint(float[] from, float[] to, float lookahead, int iterations)
         {
-            object gm = _g.GameManager;
-            object collision = _g.GameManagerType.GetField("CollisionManager", All).GetValue(gm);
+            object gm = _g.World;
+            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
             object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
             MethodInfo blockedM = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
             bool blocked = (bool)blockedM.Invoke(tree, new[] { a, b, Enum.ToObject(blockedM.GetParameters()[2].ParameterType, 37), (object)false, true, false });
             if (!blocked) return null;
-            object nav = _g.GameManagerType.GetProperty("NavMesh", All).GetValue(gm, null);
+            object nav = _g.WorldType.GetProperty("NavMesh", All).GetValue(gm, null);
             Type finder = R.Type("PathFinder");
             MethodInfo find = finder.GetMethods(All).First(m => m.Name == R.Name("PathFinder.Find") && m.GetParameters().Length == 5 && m.GetParameters()[0].ParameterType == a.GetType());
             object node = find.Invoke(null, new[] { a, b, nav, null, (object)iterations });
@@ -775,7 +776,7 @@ namespace EpidemicServer.Match
                 var chain = new List<string>();
                 for (object n = node; n != null && chain.Count < 40; n = prev.GetValue(n, null))
                 {
-                    float[] mid = Vector(edge.GetValue(n, null).GetType().GetField(R.Name("NavMeshEdge.Mid"), All).GetValue(edge.GetValue(n, null)));
+                    float[] mid = Vector(edge.GetValue(n, null).GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(n, null)));
                     chain.Add(((float)dist.GetValue(n)).ToString("0") + "@(" + mid[0].ToString("0") + "," + mid[1].ToString("0") + ")");
                 }
                 Log("path: from (" + from[0].ToString("0") + "," + from[1].ToString("0") + ") to (" + to[0].ToString("0") + "," + to[1].ToString("0") + "), chain (remaining@edge midpoint, returned node first): " + string.Join(" ", chain.ToArray()));
@@ -786,7 +787,7 @@ namespace EpidemicServer.Match
             object pick = first;
             while (pick != null && (float)dist.GetValue(pick) > firstDist - lookahead) pick = prev.GetValue(pick, null);
             if (pick == null) return null;
-            float[] m2 = Vector(edge.GetValue(pick, null).GetType().GetField(R.Name("NavMeshEdge.Mid"), All).GetValue(edge.GetValue(pick, null)));
+            float[] m2 = Vector(edge.GetValue(pick, null).GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(pick, null)));
             if (m2[0] == 0 && m2[1] == 0) return null;
             return m2;
         }
@@ -797,13 +798,13 @@ namespace EpidemicServer.Match
             if (player == null) return;
             // With a ChooseTarget (Scavenger: the nearest living hero), zombies keep fighting the bots while the
             // human is dead; without one they only ever chase the human.
-            bool playerUp = (bool)Prop(player, "IsActive") && !(bool)Prop(player, "IsDead");
+            bool playerUp = (bool)Prop(player, "IsActive") && !(bool)Prop(player, R.Name("Entity.Dead"));
             if (!playerUp && ChooseTarget == null) return;
-            foreach (object npc in (Array)_g.GameManagerType.GetField("_NPCList", All).GetValue(gm))
+            foreach (object npc in (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(gm))
             {
-                if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, "IsDead") || Passive.Contains(npc)) continue;
-                if (Prop(npc, "TeamId").Equals(Prop(player, "TeamId"))) continue;   // allies (the companion, truckers) have their own AI
-                PropertyInfo petOwner = npc.GetType().GetProperty("PetOwner", All);
+                if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, R.Name("Entity.Dead")) || Passive.Contains(npc)) continue;
+                if (Prop(npc, R.Name("Entity.Team")).Equals(Prop(player, R.Name("Entity.Team")))) continue;   // allies (the companion, truckers) have their own AI
+                PropertyInfo petOwner = npc.GetType().GetProperty(R.Name("Fighter.Master"), All);
                 if (petOwner != null && petOwner.GetValue(npc, null) != null) continue;   // pets: RunPets
                 object target = ChooseTarget != null ? ChooseTarget(npc, player)
                               : NearestTarget(npc, playerUp ? new[] { player } : new object[0]);
@@ -817,9 +818,9 @@ namespace EpidemicServer.Match
                 if (dist > aggro) continue;
                 if (!WakeUp(npc)) continue;
                 if (!HoldPosition.Contains(npc)) Steer(npc, target);
-                // Turn toward the player; the character update eases AimDirection toward this.
+                // Turn toward the player; the character update eases Fighter.Aim toward this.
                 object dir = _g.Vector2(dx / Math.Max(dist, 0.001f), dy / Math.Max(dist, 0.001f));
-                SetField(npc, "TargetAimDirection", dir);
+                SetField(npc, R.Name("Fighter.AimGoal"), dir);
                 float last;
                 float reach;
                 if (!StrikeRange.TryGetValue(npc, out reach)) reach = AttackRange;
@@ -827,12 +828,12 @@ namespace EpidemicServer.Match
                 if (!StrikeInterval.TryGetValue(npc, out interval)) interval = AttackInterval;
                 if (dist > reach || (LastAttack.TryGetValue(npc, out last) && _time - last < interval)) continue;
                 object ability;
-                if (!AttackAbility.TryGetValue(npc, out ability)) continue;
-                float[] aim = Vector(Prop(npc, "AimDirection"));
+                if (!StrikeAbility.TryGetValue(npc, out ability)) continue;
+                float[] aim = Vector(Prop(npc, R.Name("Fighter.Aim")));
                 double aimDegrees = Math.Abs(Math.Atan2(aim[0] * dy / dist - aim[1] * dx / dist, aim[0] * dx / dist + aim[1] * dy / dist)) * 180.0 / Math.PI;
                 if (aimDegrees > AttackAimDegrees) continue;
                 LastAttack[npc] = _time;
-                bool attacked = (bool)npc.GetType().GetMethod("Attack", All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(npc, new[] { dir, ability });
+                bool attacked = (bool)npc.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(npc, new[] { dir, ability });
                 Log("AI: " + Describe(npc) + " attacks " + Describe(target) + " at " + dist.ToString("0") + " units with " + ability + (attacked ? "" : " (refused)"));
             }
         }
@@ -843,9 +844,9 @@ namespace EpidemicServer.Match
         private static int _petsLogged;
 
         /// <summary>
-        /// Pets (ours, a stand-in: the original server's pet AI is not in the client). An NPC with a PetOwner (Armored
-        /// the player's InfestedMinion, ...) only plays effects in its own UpdateNPC; movement and attacks were the server's.
-        /// A pet fights the target its owner gave it (InfestedMinion.TargetIndex) or the nearest enemy within
+        /// Pets (ours, a stand-in: the original server's pet AI is not in the client). An NPC with a Fighter.Master (a hero's
+        /// summoned minion, ...) only plays effects in its own update NPC; movement and attacks were the server's.
+        /// A pet fights the target its owner gave it (World.TargetSlot) or the nearest enemy within
         /// PetEngageRange of it or of its owner, never straying past PetLeashRange from the owner; otherwise it
         /// follows the owner and stops within PetFollowDistance. Owner's 2026-10-07 playtest: the minion never moved.
         /// </summary>
@@ -853,7 +854,7 @@ namespace EpidemicServer.Match
         public static readonly List<object> ActivePets = new List<object>();
 
         /// <summary>
-        /// The nearest of the candidates and the living pets the NPC counts as enemies (GameObjectBase.IsEnemy).
+        /// The nearest of the candidates and the living pets the NPC counts as enemies (Entity.Hostile).
         /// Pets drew no aggro before (owner, 2026-10-07: "the minion is not being targeted by any enemies").
         /// </summary>
         public static object NearestTarget(object npc, IEnumerable<object> candidates)
@@ -861,10 +862,10 @@ namespace EpidemicServer.Match
             float[] at = Position(npc);
             object best = null;
             float bestDist = float.MaxValue;
-            MethodInfo isEnemy = _g.Game("ConductorGameLogic.Entities.GameObjectBase").GetMethod("IsEnemy", All);
+            MethodInfo isEnemy = R.Type("Type.WorldObject").GetMethod(R.Name("Entity.Hostile"), All);
             foreach (object c in candidates.Concat(ActivePets.Where(p => (bool)isEnemy.Invoke(npc, new[] { p }))))
             {
-                if (c == null || !(bool)Prop(c, "IsActive") || (bool)Prop(c, "IsDead")) continue;
+                if (c == null || !(bool)Prop(c, "IsActive") || (bool)Prop(c, R.Name("Entity.Dead"))) continue;
                 float d = Dist(Position(c), at);
                 if (d < bestDist) { bestDist = d; best = c; }
             }
@@ -873,35 +874,35 @@ namespace EpidemicServer.Match
 
         private static void RunPets(object gm)
         {
-            Array npcs = (Array)_g.GameManagerType.GetField("_NPCList", All).GetValue(gm);
+            Array npcs = (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(gm);
             ActivePets.Clear();
-            IList heroes = (IList)_g.GameManagerType.GetProperty("ActivePlayerList", All).GetValue(gm, null);
+            IList heroes = (IList)_g.WorldType.GetProperty(R.Name("World.Heroes"), All).GetValue(gm, null);
             MethodInfo isEnemy = null;
             foreach (object pet in npcs)
             {
-                if (pet == null || !(bool)Prop(pet, "IsActive") || (bool)Prop(pet, "IsDead")) continue;
-                PropertyInfo ownerProp = pet.GetType().GetProperty("PetOwner", All);
+                if (pet == null || !(bool)Prop(pet, "IsActive") || (bool)Prop(pet, R.Name("Entity.Dead"))) continue;
+                PropertyInfo ownerProp = pet.GetType().GetProperty(R.Name("Fighter.Master"), All);
                 object owner = ownerProp == null ? null : ownerProp.GetValue(pet, null);
                 if (owner == null) continue;
                 ActivePets.Add(pet);
-                if (!(bool)Prop(owner, "IsActive") || (bool)Prop(owner, "IsDead")) { StopSteering(pet); continue; }
-                if (isEnemy == null) isEnemy = _g.Game("ConductorGameLogic.Entities.GameObjectBase").GetMethod("IsEnemy", All);
+                if (!(bool)Prop(owner, "IsActive") || (bool)Prop(owner, R.Name("Entity.Dead"))) { StopSteering(pet); continue; }
+                if (isEnemy == null) isEnemy = R.Type("Type.WorldObject").GetMethod(R.Name("Entity.Hostile"), All);
                 WakeUp(pet);
                 float[] here = Position(pet), home = Position(owner);
                 // The owner's order first, then the nearest enemy near the pet or the owner.
                 object target = null;
-                FieldInfo order = pet.GetType().GetField("TargetIndex", All);
+                FieldInfo order = pet.GetType().GetField(R.Name("World.TargetSlot"), All);
                 if (order != null && (int)order.GetValue(pet) >= 0)
                 {
-                    object o = _g.GameManagerType.GetMethod("GetGameObject", All, null, new[] { typeof(int) }, null).Invoke(gm, new object[] { (int)order.GetValue(pet) });
-                    if (o != null && (bool)Prop(o, "IsEntity") && (bool)Prop(o, "IsActive") && !(bool)Prop(o, "IsDead")) target = o;
+                    object o = _g.WorldType.GetMethod(R.Name("World.Object"), All, null, new[] { typeof(int) }, null).Invoke(gm, new object[] { (int)order.GetValue(pet) });
+                    if (o != null && (bool)Prop(o, R.Name("Entity.IsLiving")) && (bool)Prop(o, "IsActive") && !(bool)Prop(o, R.Name("Entity.Dead"))) target = o;
                 }
                 if (target == null)
                 {
                     float best = float.MaxValue;
                     foreach (object c in npcs.Cast<object>().Concat(heroes.Cast<object>()))
                     {
-                        if (c == null || c == pet || c == owner || !(bool)Prop(c, "IsActive") || (bool)Prop(c, "IsDead")) continue;
+                        if (c == null || c == pet || c == owner || !(bool)Prop(c, "IsActive") || (bool)Prop(c, R.Name("Entity.Dead"))) continue;
                         if (!(bool)isEnemy.Invoke(pet, new[] { c })) continue;
                         float[] cp = Position(c);
                         float dPet = Dist(cp, here), dOwner = Dist(cp, home);
@@ -918,20 +919,20 @@ namespace EpidemicServer.Match
                 float[] tp = Position(target);
                 float dx = tp[0] - here[0], dy = tp[1] - here[1], dist = (float)Math.Sqrt(dx * dx + dy * dy);
                 object dir = _g.Vector2(dx / Math.Max(dist, 0.001f), dy / Math.Max(dist, 0.001f));
-                SetField(pet, "TargetAimDirection", dir);
+                SetField(pet, R.Name("Fighter.AimGoal"), dir);
                 object ability;
                 if (!PetAttack.TryGetValue(pet, out ability))
                 {
-                    object bar = pet.GetType().GetProperty("AbilityBar", All).GetValue(pet, null);
-                    Array slots = bar == null ? null : (Array)bar.GetType().GetProperty("AbilitySlots", All).GetValue(bar, null);
-                    if (slots != null) foreach (object a in slots) if (a != null) { ability = a.GetType().GetProperty("AbilityIdentifier", All).GetValue(a, null); break; }
+                    object bar = pet.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(pet, null);
+                    Array slots = bar == null ? null : (Array)bar.GetType().GetProperty(R.Name("Bar.Slots"), All).GetValue(bar, null);
+                    if (slots != null) foreach (object a in slots) if (a != null) { ability = a.GetType().GetProperty(R.Name("Ability.Key"), All).GetValue(a, null); break; }
                     PetAttack[pet] = ability;
                     if (_petsLogged++ < 5) Log("AI: pet " + Describe(pet) + " of " + Describe(owner) + " attacks with " + (ability ?? "(no ability)"));
                 }
                 float last;
                 if (ability == null || dist > AttackRange || (LastAttack.TryGetValue(pet, out last) && _time - last < AttackInterval)) continue;
                 LastAttack[pet] = _time;
-                pet.GetType().GetMethod("Attack", All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(pet, new[] { dir, ability });
+                pet.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(pet, new[] { dir, ability });
             }
         }
 
@@ -941,13 +942,13 @@ namespace EpidemicServer.Match
 
         public static float GetStat(object entity, object statType)
         {
-            object stats = Field(entity, "Stats");
+            object stats = Field(entity, R.Name("Entity.StatBlock"));
             return (float)Method(stats, "GetValue").Invoke(stats, new[] { statType });
         }
 
         public static float GetStat(object entity, string statName)
         {
-            return GetStat(entity, Enum.Parse(_g.Game("ConductorGameLogic.StatType"), statName));
+            return GetStat(entity, Enum.Parse(R.Type("Type.Stat"), statName));
         }
 
         public static float[] Position(object entity) { return Vector(Field(entity, "Position")); }
@@ -982,7 +983,7 @@ namespace EpidemicServer.Match
         public static string Describe(object o)
         {
             if (o == null) return "(none)";
-            try { return o.GetType().Name + "#" + Prop(o, "IndexGlobal"); }
+            try { return o.GetType().Name + "#" + Prop(o, R.Name("Entity.GlobalIndex")); }
             catch (Exception) { return o.GetType().Name; }
         }
 

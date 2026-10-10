@@ -1,9 +1,10 @@
 using System.Collections.Generic;
+using EpidemicServer.Resolve;
 
 namespace EpidemicServer.Match
 {
     /// <summary>
-    /// Sections of a server-to-client GameplayData frame, per the owner's
+    /// Sections of a server-to-client MatchFrame frame, per the owner's
     /// design notes (2026-10-06), written with the game's bit buffer.
     /// </summary>
     public static class MatchFrames
@@ -12,14 +13,14 @@ namespace EpidemicServer.Match
 
         /// <summary>
         /// Controllers: flag 1, then 16 slots. Slot 0 is the local client: a 1
-        /// followed by the game's own Client.ControllerServerToClientSerialize
+        /// followed by the game's own Net.WriteInput
         /// (local bits, look-at, server frame). Slots 1-15 are empty.
         /// </summary>
         public static void WriteControllers(GameBuffer b, object client0, GameRuntime game = null)
         {
             b.Write(true);
             b.Write(true);
-            client0.GetType().GetMethod("ControllerServerToClientSerialize", GameRuntime.All).Invoke(client0, new[] { b.Buffer, (object)true });
+            client0.GetType().GetMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(client0, new[] { b.Buffer, (object)true });
             for (int slot = 1; slot < ControllerSlots; slot++)
             {
                 // Bot slots: their controller as a remote client's (not local), so the human sees their aim and moves.
@@ -27,7 +28,7 @@ namespace EpidemicServer.Match
                 {
                     object c = game.GetClient(slot);
                     b.Write(true);
-                    c.GetType().GetMethod("ControllerServerToClientSerialize", GameRuntime.All).Invoke(c, new[] { b.Buffer, (object)false });
+                    c.GetType().GetMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(c, new[] { b.Buffer, (object)false });
                 }
                 else b.Write(false);
             }
@@ -45,7 +46,7 @@ namespace EpidemicServer.Match
                 b.Write(false);
                 return;
             }
-            int n = game.NumOfSynchronizables;
+            int n = game.SyncCount;
             b.Write(true);
             b.WriteRanged(0, n, items.Count);
             b.Write(true);
@@ -54,7 +55,7 @@ namespace EpidemicServer.Match
             {
                 b.WriteRanged(0, n, game.SynchronizableIndex(item));
                 item.GetType().GetMethod("Serialize", GameRuntime.All, null,
-                    new[] { game.Game("StunGameNetwork.INetBuffer"), game.Game("StunGameNetwork.IClient") }, null)
+                    new[] { R.Type("Type.NetBufferApi"), R.Type("Type.Peer") }, null)
                     .Invoke(item, new[] { b.Buffer, viewer });
             }
         }

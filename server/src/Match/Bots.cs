@@ -11,12 +11,12 @@ namespace EpidemicServer.Match
     /// Bot heroes (owner's design, 2026-10-07: Scavenger with bots from the start). The client has no player AI
     /// (Player.IsBot is only a flag), so a bot is a real hero Player on a server-side client slot (1-11), flagged
     /// IsBot, and driven the way a human's input drives a hero:
-    /// - movement: Character.InputFlags, which Character.GetMoveDirection turns into a direction relative to the
+    /// - movement: Fighter.Input, which get move direction turns into a direction relative to the
     ///   client's camera direction (1 = -right, 2 = +right, 4 = forward, 8 = back, right = (cam.Y, -cam.X));
-    /// - aim: TargetAimDirection and MousePosition;
-    /// - attacks and actions: AbilityBar.SetAbilityPressed(slot, pressed), as the human's controller record does.
+    /// - aim: Fighter.AimGoal and MousePosition;
+    /// - attacks and actions: Fighter.Press(slot, pressed), as the human's controller record does.
     /// The human's client learns about bot clients from a client-info update (reliable kind 0: count, then per
-    /// client its index and Client.ClientInfoServerToClientSerialize) and sees their aim through the controller
+    /// client its index and Net.WriteClientInfo) and sees their aim through the controller
     /// section of each frame (MatchFrames.WriteControllers).
     /// </summary>
     public sealed class Bot
@@ -82,12 +82,12 @@ namespace EpidemicServer.Match
             {
                 m.Write((byte)i);
                 object c = g.GetClient(i);
-                c.GetType().GetMethod("ClientInfoServerToClientSerialize", All).Invoke(c, new[] { m.Buffer, (object)true });
+                c.GetType().GetMethod(R.Name("Net.WriteClientInfo"), All).Invoke(c, new[] { m.Buffer, (object)true });
             }
             ServerHooks.QueueReliable(m.Buffer);
         }
 
-        public static bool IsDead(object o) { return (bool)o.GetType().GetProperty("IsDead", All).GetValue(o, null); }
+        public static bool IsDead(object o) { return (bool)o.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(o, null); }
 
         public static bool Gone(object o)
         {
@@ -103,7 +103,7 @@ namespace EpidemicServer.Match
             float[] here = ServerHooks.Position(p);
             float[] to = b.Target != null && !Gone(b.Target) ? ServerHooks.Position(b.Target) : b.Goal;
             float dist = to == null ? 0f : Dist(here, to);
-            bool attacking = b.Target != null && !Gone(b.Target) && dist <= (b.Target.GetType().Name == R.Short("Barricade") ? BarricadeRange : AttackRange);
+            bool attacking = b.Target != null && !Gone(b.Target) && dist <= (b.Target.GetType().Name == R.Short("Barrier") ? BarricadeRange : AttackRange);
             // Last resort (ours, a stand-in): a bot with somewhere to go that has not moved 30 units in
             // UnstickSeconds is moved to the spawn spot nearest its destination that it can reach from there
             // (Scavenger maps have pockets the navmesh search can't route out of).
@@ -123,7 +123,7 @@ namespace EpidemicServer.Match
                     if (spot != null)
                     {
                         object v = g.Vector2(spot[0], spot[1]);
-                        g.Game("ConductorGameLogic.Entities.Entity").GetMethod("Teleport", All).Invoke(p, new object[] { v, true });
+                        R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(p, new object[] { v, true });
                         if (Log != null) Log("scavenger: bot " + b.Name + " stuck at (" + here[0].ToString("0") + ", " + here[1].ToString("0") + ") for " + (time - b.ProgressAt).ToString("0") + " s; moved to (" + spot[0].ToString("0") + ", " + spot[1].ToString("0") + ")");
                         b.Path = null; b.ProgressAt = time; b.ProgressTo = to; b.BestDist = Dist(spot, to);
                         return;
@@ -194,7 +194,7 @@ namespace EpidemicServer.Match
                 SetInput(p, Flags(g, b, dx, dy));
                 Aim(g, p, dx, dy, new[] { here[0] + dx, here[1] + dy });
             }
-            else if (attacking && b.Target.GetType().Name == R.Short("Barricade") && dist > 16f)
+            else if (attacking && b.Target.GetType().Name == R.Short("Barrier") && dist > 16f)
                 SetInput(p, Flags(g, b, to[0] - here[0], to[1] - here[1]));   // lean into a barricade while hitting it
             else SetInput(p, 0);
             if (attacking)
@@ -212,20 +212,20 @@ namespace EpidemicServer.Match
         {
             if (pressed == b.PressedLast) return;
             b.PressedLast = pressed;
-            object bar = b.Player.GetType().GetProperty("AbilityBar", All).GetValue(b.Player, null);
-            bar.GetType().GetMethod("SetAbilityPressed", All).Invoke(bar, new object[] { b.AttackSlot, pressed });
+            object bar = b.Player.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
+            bar.GetType().GetMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { b.AttackSlot, pressed });
         }
 
         /// <summary>Taps any ability slot (capture 19, deliver 17, steal 28, ...).</summary>
         public static void Tap(Bot b, int slot, bool pressed)
         {
-            object bar = b.Player.GetType().GetProperty("AbilityBar", All).GetValue(b.Player, null);
-            bar.GetType().GetMethod("SetAbilityPressed", All).Invoke(bar, new object[] { slot, pressed });
+            object bar = b.Player.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
+            bar.GetType().GetMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { slot, pressed });
         }
 
         private static void SetInput(object p, int flags)
         {
-            PropertyInfo f = p.GetType().GetProperty("InputFlags", All);
+            PropertyInfo f = p.GetType().GetProperty(R.Name("Fighter.Input"), All);
             f.SetValue(p, Enum.ToObject(f.PropertyType, flags), null);
         }
 
@@ -234,7 +234,7 @@ namespace EpidemicServer.Match
             float len = (float)Math.Sqrt(dx * dx + dy * dy);
             if (len < 0.001f) return;
             object dir = g.Vector2(dx / len, dy / len);
-            ServerHooks.SetField(p, "TargetAimDirection", dir);
+            ServerHooks.SetField(p, R.Name("Fighter.AimGoal"), dir);
             PropertyInfo mouse = p.GetType().GetProperty("MousePosition", All);
             if (mouse != null && mouse.CanWrite) mouse.SetValue(p, g.Vector2(at[0], at[1]), null);
         }
@@ -247,7 +247,7 @@ namespace EpidemicServer.Match
             dx /= len; dy /= len;
             float cx = MatchHost.DefaultCameraX, cy = MatchHost.DefaultCameraY, cl = (float)Math.Sqrt(cx * cx + cy * cy);
             cx /= cl; cy /= cl;
-            float rx = cy, ry = -cx;                 // GetMoveDirection's "right" = (cam.Y, -cam.X)
+            float rx = cy, ry = -cx;                 // get move direction's "right" = (cam.Y, -cam.X)
             float fwd = dx * cx + dy * cy, right = dx * rx + dy * ry;
             int flags = 0;
             if (fwd > 0.38f) flags |= 4; else if (fwd < -0.38f) flags |= 8;

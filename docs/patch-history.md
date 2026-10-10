@@ -28,7 +28,7 @@ here. Where the client's own code or data says something, it is cited as such.
 
 ### v0.6 (20 Nov 2014): Crossroads replaces Horde
 - **Crossroads, a new PvE mode, replaced Horde Mode in the play window.** From here on Horde was no longer offered.
-  Our client (0.8.5) still contains Horde: its maps, HordeMode, the hub tiles and the queues. The hub shows them only
+  Our client (0.8.5) still contains Horde: its maps, WaveRules, the hub tiles and the queues. The hub shows them only
   when Crossroads (feature 45) is disabled, which is how we reach them. So our Horde is a **restoration of a mode retired
   in v0.6**, not of the game as it was at shutdown.
 - Infection level after v0.6:

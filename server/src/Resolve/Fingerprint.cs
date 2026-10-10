@@ -20,6 +20,7 @@ namespace EpidemicServer.Resolve
     ///   type:   T|&lt;assembly&gt;|&lt;shape digest&gt;|&lt;ordinal among types with that digest&gt;
     ///   field:  F|&lt;declaring type fingerprint&gt;|&lt;signature digest&gt;|&lt;ordinal&gt;
     ///   method: M|&lt;declaring type fingerprint&gt;|&lt;signature digest&gt;|&lt;ordinal&gt;
+    ///   name:   N|&lt;digest of a readable name&gt; (see NameIndex)
     /// Ordinals count in the library's own declaration order, which is fixed for a given build of the game.
     /// </summary>
     public static class Fingerprint
@@ -179,6 +180,55 @@ namespace EpidemicServer.Resolve
             if (p[0] == "M")
                 return Fingerprint.Methods(owner).Where(m => Fingerprint.Digest(Fingerprint.MethodSig(m)) == p[5]).Skip(ord).FirstOrDefault();
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The readable (not generated) names in a set of assemblies, keyed by a one-way digest: type full names,
+    /// short names and namespaces, member names and enum value names. Roles for readable names store only the
+    /// digest (N|...), so the name itself never appears in our source; it is found here at run time.
+    /// </summary>
+    public sealed class NameIndex
+    {
+        private const string Salt = "DIE-Revibed name:";
+        private readonly Dictionary<string, string> _names = new Dictionary<string, string>();
+        private readonly Dictionary<string, Type> _types = new Dictionary<string, Type>();
+
+        public NameIndex(IEnumerable<Assembly> assemblies)
+        {
+            foreach (Assembly a in assemblies)
+                foreach (Type t in Fingerprint.Types(a))
+                {
+                    Add(t.Name);
+                    Add(t.Namespace);
+                    if (Add(t.FullName) && !_types.ContainsKey(Print(t.FullName))) _types[Print(t.FullName)] = t;
+                    MemberInfo[] ms;
+                    try { ms = t.GetMembers(Fingerprint.Declared); } catch { ms = new MemberInfo[0]; }
+                    foreach (MemberInfo m in ms) Add(m.Name);
+                    if (t.IsEnum) foreach (string n in Enum.GetNames(t)) Add(n);
+                }
+        }
+
+        /// <summary>The fingerprint of a readable name.</summary>
+        public static string Print(string name) { return "N|" + Fingerprint.Digest(Salt + name); }
+
+        /// <summary>All indexed names (for the generator's collision check).</summary>
+        public IEnumerable<string> Names { get { return _names.Values; } }
+
+        /// <summary>The readable name with this fingerprint, or null.</summary>
+        public string Name(string fp) { string n; return _names.TryGetValue(fp, out n) ? n : null; }
+
+        /// <summary>The type whose full name has this fingerprint, or null.</summary>
+        public Type Type(string fp) { Type t; return _types.TryGetValue(fp, out t) ? t : null; }
+
+        private bool Add(string name)
+        {
+            if (string.IsNullOrEmpty(name) || Fingerprint.Generated(name)) return false;
+            string fp = Print(name);
+            string had;
+            if (_names.TryGetValue(fp, out had) && had != name) throw new Exception("name digest collision");
+            _names[fp] = name;
+            return true;
         }
     }
 }

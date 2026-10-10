@@ -8,22 +8,22 @@ using EpidemicServer.Resolve;
 namespace EpidemicServer.Match
 {
     /// <summary>
-    /// Practice (the hub's solo Scout missions, game mode ScoutMission on maps 15/16/17). The
-    /// client's ScoutMission hooks are empty, so the whole mission script is ours (owner's design,
+    /// Practice (the hub's solo Scout missions, game mode PracticeRules on maps 15/16/17). The
+    /// client's PracticeRules hooks are empty, so the whole mission script is ours (owner's design,
     /// 2026-10-06); what the client shows comes from its own data:
-    /// - Goals: ScoutMission.LoadGameMode sets the supplies goal per map (balance data: Outpost 60, Lab 30, Club 30).
-    /// - Objectives: RaidEventViewSettings (sharedassets1) has, for the scout events 17 ScoutCaptureFlag,
-    ///   18 ScoutKillLooter, 19 ScoutStealSupplies and 20 ScoutReturnToTruck, the objective types
-    ///   MoveTo (1) and Objective1 (2) only; the VisualID is the option index (return: 0 Club, 1 Lab, 2 Outpost).
-    /// - Interactions: steal is an interaction point of type GrapSupplies (0), the flag one of type Flag (3);
-    ///   the client asks with GameMessage 29 (StartInteraction: ushort id, ushort second value).
+    /// - Goals: load game mode sets the supplies goal per map (balance data: Outpost 60, Lab 30, Club 30).
+    /// - Objectives: raid event view settings (sharedassets1) has, for the scout events 17 Mission.Flag,
+    ///   18 Mission.Looter, 19 Mission.Steal and 20 Mission.Return, the objective types
+    ///   MoveTo (1) and Objective1 (2) only; the Map.Visual is the option index (return: 0 Club, 1 Lab, 2 Outpost).
+    /// - Interactions: steal is an interaction point of type Interaction.Grab (0), the flag one of type Flag (3);
+    ///   the client asks with MatchMessage 29 (start interaction: ushort id, ushort second value).
     /// Numbers marked "stand-in" have no source.
     /// </summary>
     public sealed class ScoutDirector
     {
         private const BindingFlags All = GameRuntime.All;
         public const int StartInteractionMessage = 29, ObjectiveUpdateMessage = 30, TeamFinishedMessage = 4;
-        public const int StealSupplies = 19, KillLooter = 18, CaptureFlag = 17, ReturnToTruck = 20;
+        public const int SupplyRaid = 19, LooterHunt = 18, FlagTake = 17, BackToTruck = 20;
         public const int MoveTo = 1, Objective1 = 2;
         public const float NearEvent = 120f, NearTruck = 80f, TransmissionRange = 60f, InteractRange = 30f;
         /// <summary>Stand-in: how long the steal and the flag capture take.</summary>
@@ -58,7 +58,7 @@ namespace EpidemicServer.Match
         private readonly List<float[]> _respawns = new List<float[]>();
         private readonly List<object> _transmissions = new List<object>();
         private readonly HashSet<object> _played = new HashSet<object>();
-        private readonly List<float[]> _eventSpots = new List<float[]>();   // Spawn_EventEntities: x, y, dx, dy, state
+        private readonly List<float[]> _eventSpots = new List<float[]>();   // MapKind.EventSpawns: x, y, dx, dy, state
         private float[] _ambushAt, _assaultAt;
         private int _ambushMax;
         private float _assaultRadius, _ambushUntil = -1f, _nextAmbush;
@@ -79,7 +79,7 @@ namespace EpidemicServer.Match
         public static string VeteranType { get { return R.Name("Zombie.Veteran"); } }
         public const int AssaultVeterans = 3, AmbushVeteranEvery = 4;
         private int _ambushSpawns;
-        /// <summary>An Event_TriggerPosition within this distance of an assault starts it too (ours: the map doesn't link them by ID).</summary>
+        /// <summary>An MapKind.TriggerSpot within this distance of an assault starts it too (ours: the map doesn't link them by ID).</summary>
         public const float AssaultTriggerPairRange = 150f;
         private bool _ambushDone, _assaultDone;
         private float _time, _stepSince, _interactStart = -1f, _diedAt = -1f;
@@ -94,7 +94,7 @@ namespace EpidemicServer.Match
             _spawn = spawn;
             _log = log;
             Map = g.MapIndex;
-            Event = Map == GameRuntime.ScoutOutpostMap ? StealSupplies : Map == GameRuntime.ScoutLabMap ? KillLooter : CaptureFlag;
+            Event = Map == GameRuntime.ScoutOutpostMap ? SupplyRaid : Map == GameRuntime.ScoutLabMap ? LooterHunt : FlagTake;
             ReturnVisual = Map == GameRuntime.ScoutClubMap ? 0 : Map == GameRuntime.ScoutLabMap ? 1 : 2;
             object settings = Supplies().GetType().GetProperty("Settings", All).GetValue(Supplies(), null);
             Goal = Convert.ToInt32(GetField(settings, R.Name("ScoutSettings.Goal")));
@@ -106,42 +106,42 @@ namespace EpidemicServer.Match
         {
             int statics = 0, barricades = 0;
             var groups = new Dictionary<int, List<object>>();
-            foreach (object o in _g.MapObjects())
+            foreach (object o in _g.MapThings())
             {
                 string kind = o.GetType().Name;
                 float[] p = _g.MapPosition(o), d = _g.MapDirection(o);
-                if (kind == "Spawn_Static")
+                if (kind == R.Name("MapKind.StaticSpawn"))
                 {
-                    object z = SpawnZombie(GameRuntime.PlainZombieType, p, d, o.GetType().GetProperty("SpawnState", All).GetValue(o, null));
+                    object z = SpawnZombie(GameRuntime.PlainZombieType, p, d, o.GetType().GetProperty(R.Name("Npc.Pose"), All).GetValue(o, null));
                     if (z != null) { ServerHooks.AggroRange[z] = StaticAggroRange; statics++; }
                 }
-                else if (kind == "Spawn_EventEntities")
-                    _eventSpots.Add(new[] { p[0], p[1], d[0], d[1], Convert.ToSingle(Convert.ToInt32(o.GetType().GetProperty("SpawnState", All).GetValue(o, null))) });
-                else if (kind == "Spawn_Destructible")
+                else if (kind == R.Name("MapKind.EventSpawns"))
+                    _eventSpots.Add(new[] { p[0], p[1], d[0], d[1], Convert.ToSingle(Convert.ToInt32(o.GetType().GetProperty(R.Name("Npc.Pose"), All).GetValue(o, null))) });
+                else if (kind == R.Name("MapKind.Breakable"))
                 {
                     object b = SpawnBarricade(o, p, d);
-                    int group = (int)o.GetType().GetField("GroupID").GetValue(o);
+                    int group = (int)o.GetType().GetField(R.Name("Map.Group")).GetValue(o);
                     if (!groups.ContainsKey(group)) groups[group] = new List<object>();
                     groups[group].Add(b);
                     barricades++;
                 }
-                else if (kind == "Event_RaidEvent") EventAt = p;
-                else if (kind == "TruckerSpawnPoint") TruckAt = p;
-                else if (kind == "Spawn_RaidRespawn") _respawns.Add(p);
-                else if (kind == "TransmissionSpawnPoint") _transmissions.Add(o);
-                else if (kind == "Event_Ambush")
+                else if (kind == R.Name("MapKind.Raid")) EventAt = p;
+                else if (kind == R.Name("MapKind.DriverStart")) TruckAt = p;
+                else if (kind == R.Name("MapKind.RaidRevive")) _respawns.Add(p);
+                else if (kind == R.Name("MapKind.Radio")) _transmissions.Add(o);
+                else if (kind == R.Name("MapKind.Ambush"))
                 {
                     _ambushAt = p;
-                    _ambushMax = Convert.ToInt32(GameRuntime.MapValue(o, "MaxActiveWalkers"));
+                    _ambushMax = Convert.ToInt32(GameRuntime.MapValue(o, R.Name("Map.WalkerCap")));
                 }
-                else if (kind == "Event_Assault")
+                else if (kind == R.Name("MapKind.Assault"))
                 {
                     _assaultAt = p;
-                    _assaultRadius = Convert.ToSingle(GameRuntime.MapValue(o, "TriggerRadius"));
+                    _assaultRadius = Convert.ToSingle(GameRuntime.MapValue(o, R.Name("Map.TriggerRange")));
                     _assaultRoster.Clear();
                     // The assault's roster from the map: walkers and its specials (Butcher Zombie.Butcher,
-                    // Floater Zombie.Floater, walking bomb Zombie.WalkingBomb: the types behind GameObjectBase.IsButcher,
-                    // IsWalkingBomb, and the tutorial's Floater).
+                    // Floater Zombie.Floater, walking bomb Zombie.WalkingBomb: the types behind is butcher,
+                    // is walking bomb, and the tutorial's Floater).
                     foreach (var kv in new[] { new KeyValuePair<string, string>("Walkers", GameRuntime.PlainZombieType), new KeyValuePair<string, string>("Butchers", ButcherType),
                                                new KeyValuePair<string, string>("Floaters", FloaterType), new KeyValuePair<string, string>("WalkingBombs", WalkingBombType) })
                     {
@@ -151,7 +151,7 @@ namespace EpidemicServer.Match
                     }
                     for (int i = 0; i < AssaultVeterans; i++) _assaultRoster.Add(VeteranType);
                 }
-                else if (kind == "Event_TriggerPosition") _triggerPositions.Add(p);
+                else if (kind == R.Name("MapKind.TriggerSpot")) _triggerPositions.Add(p);
             }
             Type groupType = R.Type("BarricadeGroup");
             foreach (var kv in groups)
@@ -184,7 +184,7 @@ namespace EpidemicServer.Match
                 object z = _g.SpawnNpc(type, p[0], p[1], GameRuntime.ZombieTeam, d);
                 if (state != null)
                 {
-                    PropertyInfo ss = z.GetType().GetProperty("SpawnState_Current", All);
+                    PropertyInfo ss = z.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
                     ss.SetValue(z, Enum.ToObject(ss.PropertyType, Convert.ToInt32(state)), null);
                 }
                 Zombies.Add(z);
@@ -205,20 +205,20 @@ namespace EpidemicServer.Match
         /// <summary>A barricade piece set up as in the tutorial; Neutral so the player can break it.</summary>
         private object SpawnBarricade(object map, float[] p, float[] d)
         {
-            Type t = R.Type("Barricade");
+            Type t = R.Type("Barrier");
             object b = _g.TakeFromPool(t);
             Type mt = map.GetType();
             b.GetType().GetField("Position", All).SetValue(b, _g.Vector2(p[0], p[1]));
-            b.GetType().GetField("SpawnPosition", All).SetValue(b, _g.Vector2(p[0], p[1]));
+            b.GetType().GetField(R.Name("Map.Position"), All).SetValue(b, _g.Vector2(p[0], p[1]));
             t.GetField(R.Name("Barricade.Facing"), All).SetValue(b, _g.Vector2(d[0], d[1]));
             FieldInfo part = t.GetField(R.Name("Barricade.Part"), All);
-            part.SetValue(b, Enum.Parse(part.FieldType, mt.GetField("Part").GetValue(map).ToString()));
-            t.GetField(R.Name("Barricade.Kind"), All).SetValue(b, mt.GetField("BarricadeType").GetValue(map));
+            part.SetValue(b, Enum.Parse(part.FieldType, mt.GetField(R.Name("Map.Piece")).GetValue(map).ToString()));
+            t.GetField(R.Name("Barricade.Kind"), All).SetValue(b, mt.GetField(R.Name("Map.BarricadeKind")).GetValue(map));
             FieldInfo team = t.GetField(R.Name("Barricade.Team"), All);
-            team.SetValue(b, Enum.Parse(team.FieldType, "Neutral"));
-            b.GetType().GetProperty("TeamId", All).SetValue(b, Enum.Parse(team.FieldType, "Neutral"), null);
-            _g.GameManagerType.GetMethod("SpawnGameObject", All).Invoke(_g.GameManager, new object[] { b, null, null });
-            float hp = ServerHooks.GetStat(b, "MaxHealth");
+            team.SetValue(b, Enum.Parse(team.FieldType, R.Name("Team.None")));
+            b.GetType().GetProperty(R.Name("Entity.Team"), All).SetValue(b, Enum.Parse(team.FieldType, R.Name("Team.None")), null);
+            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { b, null, null });
+            float hp = ServerHooks.GetStat(b, R.Name("Stat.HealthMax"));
             if (hp <= 0) hp = BarricadeHp;
             t.GetMethod(R.Name("Barricade.SetHealth"), All).Invoke(b, new object[] { hp });
             return b;
@@ -241,7 +241,7 @@ namespace EpidemicServer.Match
                 SetStep("event", "the player is within " + NearEvent + " units of the event");
             else if (Step == "event")
             {
-                if (Event == KillLooter && Looter != null && Destroyed(Looter))
+                if (Event == LooterHunt && Looter != null && Destroyed(Looter))
                 {
                     // The game's own drop (Supplies.DropFromKill) gives 3 (balance data); Lab has no supply spawn
                     // points, so the rest of the goal is dropped where the Looter fell (stand-in).
@@ -249,12 +249,12 @@ namespace EpidemicServer.Match
                     if (rest > 0) DropPickups(ServerHooks.Position(Looter), rest);
                     SetStep("return", "the Looter is dead; " + Math.Max(rest, 0) + " supplies dropped there besides the game's own drop (stand-in)");
                 }
-                else if (Event != KillLooter) Interaction(time, a);
+                else if (Event != LooterHunt) Interaction(time, a);
             }
             else if (Step == "return" && TruckAt != null && Distance(a, TruckAt) <= NearTruck && _returnObjective == MoveTo)
-                Objective(ReturnToTruck, ReturnVisual, Objective1, true, "the player reached the truck");
+                Objective(BackToTruck, ReturnVisual, Objective1, true, "the player reached the truck");
             if (Step == "return") SupplySafetyNet(time);
-            if (Step == "return" && TeamSupplies() >= Goal) Win();
+            if (Step == "return" && SuppliesBanked() >= Goal) Win();
         }
 
         private int _returnObjective;
@@ -272,20 +272,20 @@ namespace EpidemicServer.Match
             }
             else if (step == "event")
             {
-                if (Event == KillLooter)
+                if (Event == LooterHunt)
                 {
                     Looter = SpawnZombie(LooterType, EventAt, new[] { 0f, 1f }, null);
                     if (Looter != null)
                     {
-                        Looter.GetType().GetProperty("SpawnState_Current", All).SetValue(Looter, Enum.ToObject(Looter.GetType().GetProperty("SpawnState_Current", All).PropertyType, 0), null);
-                        _log("scout: Looter " + ServerHooks.Describe(Looter) + " at " + Fmt(EventAt) + ", Health " + ServerHooks.GetStat(Looter, "Health") + ", IsLooter " +
-                             Looter.GetType().GetProperty("IsLooter", All).GetValue(Looter, null));
+                        Looter.GetType().GetProperty(R.Name("Npc.PoseNow"), All).SetValue(Looter, Enum.ToObject(Looter.GetType().GetProperty(R.Name("Npc.PoseNow"), All).PropertyType, 0), null);
+                        _log("scout: Looter " + ServerHooks.Describe(Looter) + " at " + Fmt(EventAt) + ", Health " + ServerHooks.GetStat(Looter, R.Name("Stat.Health")) + ", Npc.Looter " +
+                             Looter.GetType().GetProperty(R.Name("Npc.Looter"), All).GetValue(Looter, null));
                     }
                     Objective(Event, 0, Objective1, false);
                 }
                 else
                 {
-                    AddInteraction(Event == StealSupplies ? 0 : 3);
+                    AddInteraction(Event == SupplyRaid ? 0 : 3);
                     Objective(Event, 0, Objective1, false);
                 }
             }
@@ -293,40 +293,40 @@ namespace EpidemicServer.Match
             {
                 Interactions().Clear();
                 _returnObjective = 0;
-                Objective(ReturnToTruck, ReturnVisual, MoveTo, true);
+                Objective(BackToTruck, ReturnVisual, MoveTo, true);
             }
         }
 
-        // ---- objectives (ScoutMode.Lists lists, ObjectiveUpdate) ----
+        // ---- objectives (ScoutMode.Lists lists, objective update) ----
 
-        private object Lists() { return GetField(_g.GameMode, R.Name("ScoutMode.Lists")); }
+        private object Lists() { return GetField(_g.ActiveMode, R.Name("ScoutMode.Lists")); }
         private IList Interactions() { return (IList)GetField(Lists(), R.Name("ScoutLists.Interactions")); }
         private IList Markers() { return (IList)GetField(Lists(), R.Name("ScoutLists.Markers")); }
         private IList States() { return (IList)GetField(Lists(), R.Name("ScoutLists.States")); }
 
         /// <summary>
         /// Sets the current objective (ScoutLists.States holds just it), a minimap marker at its place (ScoutLists.Markers), and
-        /// sends ObjectiveUpdate (GameMessage 30) built with the game's own CrossroadsGUIUpdate.
+        /// sends objective update (MatchMessage 30) built with the game's own MissionUi.
         /// </summary>
         private void Objective(int evt, int visual, int objective, bool supplies, string why = null, bool newMission = false)
         {
-            if (evt == ReturnToTruck) _returnObjective = objective;
-            Type st = _g.Game("ConductorGameLogic.View.RaidEventObjectiveState");
+            if (evt == BackToTruck) _returnObjective = objective;
+            Type st = R.Type("Type.ObjectiveState");
             object state = Activator.CreateInstance(st);
             SetEnum(state, "EventType", evt);
-            st.GetField("VisualID").SetValue(state, (ushort)visual);
-            SetEnum(state, "Objective", objective);
+            st.GetField(R.Name("Map.Visual")).SetValue(state, (ushort)visual);
+            SetEnum(state, R.Name("Ui.ObjectiveField"), objective);
             if (supplies)
             {
-                SetOptional(state, "ProgressUnit", Enum.ToObject(OptionalArg(st, "ProgressUnit"), 2));   // ObjectiveProgressUnit.Supplies
-                SetOptional(state, "ProgressValue", Convert.ChangeType(Goal, OptionalArg(st, "ProgressValue")));
+                SetOptional(state, R.Name("Room.Step"), Enum.ToObject(OptionalArg(st, R.Name("Room.Step")), 2));   // objective-progress-unit.Supplies
+                SetOptional(state, R.Name("Room.Value"), Convert.ChangeType(Goal, OptionalArg(st, R.Name("Room.Value"))));
             }
             IList states = States();
             states.Clear();
             states.Add(state);
             IList markers = Markers();
             markers.Clear();
-            float[] at = evt == ReturnToTruck ? TruckAt : EventAt;
+            float[] at = evt == BackToTruck ? TruckAt : EventAt;
             if (at != null)
             {
                 Type mt = R.Type("ScoutMarker");
@@ -336,35 +336,35 @@ namespace EpidemicServer.Match
                 mt.GetField(R.Name("ScoutMarker.Position"), All).SetValue(marker, _g.Vector2(at[0], at[1]));
                 markers.Add(marker);
             }
-            object update = Activator.CreateInstance(_g.Game("ConductorGameLogic.View.CrossroadsGUIUpdate"));
-            if (newMission) update.GetType().GetMethod("AddNewMissionData", All).Invoke(update, null);
-            update.GetType().GetMethod("AddObjectiveUpdate", All).Invoke(update, new[] { state });
+            object update = Activator.CreateInstance(R.Type("Type.MissionUi"));
+            if (newMission) update.GetType().GetMethod(R.Name("Ui.AddMission"), All).Invoke(update, null);
+            update.GetType().GetMethod(R.Name("Ui.Objective"), All).Invoke(update, new[] { state });
             // Event 4 (start new objective: the objective log takes the new state) and 3 (minimap).
-            update.GetType().GetMethod("AddObjectiveLogUpdateDelay", All).Invoke(update, new object[] { false });
-            update.GetType().GetMethod("AddMinimapUpdateDelay", All).Invoke(update, null);
+            update.GetType().GetMethod(R.Name("Ui.ObjectiveLogDelay"), All).Invoke(update, new object[] { false });
+            update.GetType().GetMethod(R.Name("Ui.MinimapDelay"), All).Invoke(update, null);
             // The event's Objective transmission once, with its first objective. Not for the return:
-            // for Lab its package is the Looter intro again (RaidEventViewSettings), and the truck's own
-            // transmission points (NotEnoughSupplies / DeliverSupplies) speak there.
-            bool speak = evt != ReturnToTruck && _spoken.Add(evt);
+            // for Lab its package is the Looter intro again (raid event view settings), and the truck's own
+            // transmission points (Ui.TooFewSupplies / Mode.Deliver) speak there.
+            bool speak = evt != BackToTruck && _spoken.Add(evt);
             if (speak)
             {
-                object transmission = Enum.ToObject(_g.Game("ConductorGameLogic.View.TransmissionType"), 1);   // Objective
-                update.GetType().GetMethod("AddTransmissionData", All, null, new[] { _g.Game("ConductorGameLogic.View.RaidEventType"), transmission.GetType(), typeof(int), typeof(float) }, null)
-                    .Invoke(update, new[] { Enum.ToObject(_g.Game("ConductorGameLogic.View.RaidEventType"), evt), transmission, visual, 0f });
+                object transmission = Enum.ToObject(R.Type("Type.RadioKind"), 1);   // Objective
+                update.GetType().GetMethod(R.Name("Ui.AddRadio"), All, null, new[] { R.Type("Type.RaidKind"), transmission.GetType(), typeof(int), typeof(float) }, null)
+                    .Invoke(update, new[] { Enum.ToObject(R.Type("Type.RaidKind"), evt), transmission, visual, 0f });
             }
             SendUpdate(update);
-            _log("scout: objective " + EventName(evt) + " visual " + visual + " " + (objective == MoveTo ? "MoveTo" : "Objective1") + (supplies ? ", supplies " + Goal : "") +
+            _log("scout: objective " + EventName(evt) + " visual " + visual + " " + (objective == MoveTo ? "MoveTo" : R.Name("Ui.FirstObjective")) + (supplies ? ", supplies " + Goal : "") +
                  ", marker at " + Fmt(at) + (why == null ? "" : " (" + why + ")"));
         }
 
         private void SendUpdate(object update)
         {
             MethodInfo serialize = update.GetType().GetMethod("Serialize", All);
-            ServerHooks.SendGameMessage(ObjectiveUpdateMessage, m => serialize.Invoke(update, new[] { m.Buffer }));
+            ServerHooks.SendMatchMessage(ObjectiveUpdateMessage, m => serialize.Invoke(update, new[] { m.Buffer }));
         }
 
         /// <summary>
-        /// The map's transmission points (EventType, TransmissionType, VisualID) play once when the player comes
+        /// The map's transmission points (EventType, Ui.RadioKind, Map.Visual) play once when the player comes
         /// near one. The map doesn't say when in the event a point belongs (ours, an inference from the
         /// Outpost playtest: "It's a trap" played on the way in): the event's points along the route play
         /// before the event is done, its points within EventAreaRange of the target only after it (the
@@ -379,15 +379,15 @@ namespace EpidemicServer.Match
                 int evt = Convert.ToInt32(GameRuntime.MapValue(t, "EventType"));
                 float[] at = _g.MapPosition(t);
                 bool nearTarget = EventAt != null && Distance(at, EventAt) <= EventAreaRange;
-                bool allowed = evt == ReturnToTruck ? done : evt == Event && (nearTarget ? done : !done);
+                bool allowed = evt == BackToTruck ? done : evt == Event && (nearTarget ? done : !done);
                 if (!allowed || Distance(a, at) > TransmissionRange) continue;
-                string type = GameRuntime.MapValue(t, "TransmissionType").ToString();
-                if (evt == ReturnToTruck && (type == "NotEnoughSupplies" || type == "DeliverSupplies") && (CarriedSupplies() + TeamSupplies() >= Goal) != (type == "DeliverSupplies")) continue;
+                string type = GameRuntime.MapValue(t, R.Name("Ui.RadioKind")).ToString();
+                if (evt == BackToTruck && (type == R.Name("Ui.TooFewSupplies") || type == R.Name("Mode.Deliver")) && (SuppliesCarried() + SuppliesBanked() >= Goal) != (type == R.Name("Mode.Deliver"))) continue;
                 _played.Add(t);
-                int visual = Convert.ToInt32(GameRuntime.MapValue(t, "VisualID"));
-                object update = Activator.CreateInstance(_g.Game("ConductorGameLogic.View.CrossroadsGUIUpdate"));
-                Type rt = _g.Game("ConductorGameLogic.View.RaidEventType"), tt = _g.Game("ConductorGameLogic.View.TransmissionType");
-                update.GetType().GetMethod("AddTransmissionData", All, null, new[] { rt, tt, typeof(int), typeof(float) }, null)
+                int visual = Convert.ToInt32(GameRuntime.MapValue(t, R.Name("Map.Visual")));
+                object update = Activator.CreateInstance(R.Type("Type.MissionUi"));
+                Type rt = R.Type("Type.RaidKind"), tt = R.Type("Type.RadioKind");
+                update.GetType().GetMethod(R.Name("Ui.AddRadio"), All, null, new[] { rt, tt, typeof(int), typeof(float) }, null)
                     .Invoke(update, new[] { Enum.ToObject(rt, evt), Enum.Parse(tt, type), visual, 0f });
                 SendUpdate(update);
                 _log("scout: transmission " + type + " for " + EventName(evt) + " visual " + visual + " at " + Fmt(_g.MapPosition(t)));
@@ -398,10 +398,10 @@ namespace EpidemicServer.Match
 
         private void AddInteraction(int type)
         {
-            Type it = _g.Game("ConductorGameLogic.View.InteractionPoint");
+            Type it = R.Type("Type.Interaction");
             object p = Activator.CreateInstance(it);
             it.GetField("ID").SetValue(p, (ushort)1);
-            it.GetField("VisualID").SetValue(p, (ushort)0);
+            it.GetField(R.Name("Map.Visual")).SetValue(p, (ushort)0);
             it.GetField("Position").SetValue(p, _g.Vector2(EventAt[0], EventAt[1]));
             it.GetField("Direction").SetValue(p, _g.Vector2(0f, 1f));
             SetEnum(p, "Event", Event);
@@ -409,7 +409,7 @@ namespace EpidemicServer.Match
             SetEnum(p, "State", 1);   // Allowed
             Interactions().Clear();
             Interactions().Add(p);
-            _log("scout: interaction point 1, type " + (type == 0 ? "GrapSupplies" : "Flag") + " at " + Fmt(EventAt));
+            _log("scout: interaction point 1, type " + (type == 0 ? R.Name("Interaction.Grab") : R.Name("Interaction.Flag")) + " at " + Fmt(EventAt));
         }
 
         private void SetInteraction(int state, float progress)
@@ -418,7 +418,7 @@ namespace EpidemicServer.Match
             if (list.Count == 0) return;
             object p = list[0];
             SetEnum(p, "State", state);
-            p.GetType().GetField("Progress").SetValue(p, progress);
+            p.GetType().GetField(R.Name("Ui.Progress")).SetValue(p, progress);
             list[0] = p;   // a struct: write it back
         }
 
@@ -428,7 +428,7 @@ namespace EpidemicServer.Match
             ushort id = b.ReadUShort(), second = b.ReadUShort();
             float[] a = ServerHooks.Position(_player);
             bool ok = Step == "event" && Interactions().Count > 0 && EventAt != null && Distance(a, EventAt) <= InteractRange + 20f;
-            _log("scout: StartInteraction (" + id + ", " + second + ") at " + Distance(a, EventAt ?? a).ToString("0.0") + " units" + (ok ? "; started" : "; refused"));
+            _log("scout: start interaction (" + id + ", " + second + ") at " + Distance(a, EventAt ?? a).ToString("0.0") + " units" + (ok ? "; started" : "; refused"));
             if (ok && _interactStart < 0f) { _interactStart = _time; SetInteraction(3, 0f); }
             return true;
         }
@@ -436,7 +436,7 @@ namespace EpidemicServer.Match
         private void Interaction(float time, float[] a)
         {
             if (_interactStart < 0f) return;
-            bool dead = (bool)_player.GetType().GetProperty("IsDead", All).GetValue(_player, null);
+            bool dead = (bool)_player.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(_player, null);
             if (dead || Distance(a, EventAt) > InteractRange + 20f)
             {
                 _interactStart = -1f;
@@ -448,10 +448,10 @@ namespace EpidemicServer.Match
             SetInteraction(progress >= 1f ? 4 : 3, progress);
             if (progress < 1f) return;
             _interactStart = -1f;
-            if (Event == StealSupplies)
+            if (Event == SupplyRaid)
             {
                 Supplies().GetType().GetMethod(R.Name("Supplies.Give"), All).Invoke(Supplies(), new object[] { _player, Goal });
-                SetStep("return", "the player stole the supplies (" + Goal + "; carried now " + CarriedSupplies() + ")");
+                SetStep("return", "the player stole the supplies (" + Goal + "; carried now " + SuppliesCarried() + ")");
             }
             else
             {
@@ -469,10 +469,10 @@ namespace EpidemicServer.Match
         /// </summary>
         private void SupplySafetyNet(float time)
         {
-            int have = CarriedSupplies() + TeamSupplies();
+            int have = SuppliesCarried() + SuppliesBanked();
             // Not while the player is dead: her carried supplies are being dropped (Supplies.DropOnDeath) and the
             // new pickups only count once they are active.
-            if (have >= Goal || TruckAt == null || (bool)_player.GetType().GetProperty("IsDead", All).GetValue(_player, null)) { _unreachableSince = -1f; return; }
+            if (have >= Goal || TruckAt == null || (bool)_player.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(_player, null)) { _unreachableSince = -1f; return; }
             var ground = _g.ActiveSynchronizables(new HashSet<object>()).Where(o => o.GetType().Name == R.Short("SupplyPickup")).ToList();
             int onGround = ground.Sum(o => Convert.ToInt32(GetField(o, R.Name("SupplyPickup.Amount"))));
             _drops.RemoveAll(d => !ground.Contains(d.Key));
@@ -493,7 +493,7 @@ namespace EpidemicServer.Match
         private readonly List<KeyValuePair<object, float>> _drops = new List<KeyValuePair<object, float>>();
         private float _unreachableSince = -1f;
 
-        private object Supplies() { return _g.GameMode.GetType().GetProperty("SupplyData", All).GetValue(_g.GameMode, null); }
+        private object Supplies() { return _g.ActiveMode.GetType().GetProperty(R.Name("Mode.Supplies"), All).GetValue(_g.ActiveMode, null); }
 
         private void RegisterSupplies()
         {
@@ -501,16 +501,16 @@ namespace EpidemicServer.Match
             supplies.GetType().GetMethod(R.Name("Supplies.Register"), All).Invoke(supplies, new[] { _player });
         }
 
-        public int CarriedSupplies()
+        public int SuppliesCarried()
         {
-            ushort me = (ushort)_player.GetType().GetProperty("IndexPlayer", All).GetValue(_player, null);
+            ushort me = (ushort)_player.GetType().GetProperty(R.Name("Entity.HeroIndex"), All).GetValue(_player, null);
             return (int)Supplies().GetType().GetMethod(R.Name("Supplies.Carried"), All).Invoke(Supplies(), new object[] { (int)me });
         }
 
-        public int TeamSupplies()
+        public int SuppliesBanked()
         {
             MethodInfo m = Supplies().GetType().GetMethod(R.Name("Supplies.Delivered"), All);
-            return (int)m.Invoke(Supplies(), new[] { _player.GetType().GetProperty("TeamId", All).GetValue(_player, null) });
+            return (int)m.Invoke(Supplies(), new[] { _player.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(_player, null) });
         }
 
         /// <summary>Ground pickups (SupplyPickup: position and amount fields) in a ring, as in the tutorial.</summary>
@@ -525,7 +525,7 @@ namespace EpidemicServer.Match
                 float r = count == 1 ? 0f : DropRadius;
                 ServerHooks.SetField(pickup, R.Name("Pickup.Position"), _g.Vector2(at[0] + (float)Math.Cos(angle) * r, at[1] + (float)Math.Sin(angle) * r));
                 ServerHooks.SetField(pickup, R.Name("SupplyPickup.Amount"), (byte)Math.Min(SupplyPerPickup, total - i * SupplyPerPickup));
-                _g.GameManagerType.GetMethod("SpawnGameObject", All).Invoke(_g.GameManager, new object[] { pickup, null, null });
+                _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { pickup, null, null });
                 if (track) _drops.Add(new KeyValuePair<object, float>(pickup, _time));
             }
         }
@@ -564,8 +564,8 @@ namespace EpidemicServer.Match
         }
 
         /// <summary>
-        /// The map's Event_Assault, once: it starts when the player comes within its trigger radius (at least 50)
-        /// of the assault point or of the nearest Event_TriggerPosition (within AssaultTriggerPairRange),
+        /// The map's MapKind.Assault, once: it starts when the player comes within its trigger radius (at least 50)
+        /// of the assault point or of the nearest MapKind.TriggerSpot (within AssaultTriggerPairRange),
         /// and spawns its whole roster near the assault point (Club: "that's a big one" is its Floater).
         /// </summary>
         private void Assault(float[] a)
@@ -587,7 +587,7 @@ namespace EpidemicServer.Match
                 object z = SpawnZombie(type, new[] { _assaultAt[0] + (float)Math.Cos(ang) * 30f, _assaultAt[1] + (float)Math.Sin(ang) * 30f }, new[] { 0f, 1f }, 0);
                 if (z == null) { spawned.Add(type + " (none left in the pool)"); continue; }
                 ServerHooks.AggroRange[z] = 400f;   // an assault comes for the player
-                spawned.Add(ServerHooks.Describe(z) + " Health " + ServerHooks.GetStat(z, "Health"));
+                spawned.Add(ServerHooks.Describe(z) + " Health " + ServerHooks.GetStat(z, R.Name("Stat.Health")));
             }
             _log("scout: assault at " + Fmt(_assaultAt) + " (trigger " + Fmt(_assaultTrigger) + "): " + string.Join(", ", spawned.ToArray()));
         }
@@ -597,13 +597,13 @@ namespace EpidemicServer.Match
         /// <summary>the player drops what she carries when she dies (Supplies.DropOnDeath) and comes back at the nearest raid respawn point after a few seconds.</summary>
         private void Respawn(float time)
         {
-            bool dead = (bool)_player.GetType().GetProperty("IsDead", All).GetValue(_player, null);
+            bool dead = (bool)_player.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(_player, null);
             if (!dead) { _diedAt = -1f; return; }
             if (_diedAt < 0f)
             {
                 _diedAt = time;
                 _diedPos = ServerHooks.Position(_player);
-                int carried = CarriedSupplies();
+                int carried = SuppliesCarried();
                 try { Supplies().GetType().GetMethod(R.Name("Supplies.DropOnDeath"), All).Invoke(Supplies(), new[] { _player }); }
                 catch (Exception e) { _log("scout: dropping carried supplies failed: " + GameRuntime.Unwrap(e).Message); }
                 _log("scout: the player died at " + Fmt(_diedPos) + " carrying " + carried + " (dropped); respawning in " + RespawnSeconds + " s");
@@ -612,25 +612,25 @@ namespace EpidemicServer.Match
             if (time - _diedAt < RespawnSeconds) return;
             float[] at = _respawns.OrderBy(r => Distance(r, _diedPos)).FirstOrDefault() ?? new[] { _spawn.X, _spawn.Y };
             object v = _g.Vector2(at[0], at[1]);
-            _player.GetType().GetField("SpawnPosition", All).SetValue(_player, v);
-            _g.Game("ConductorGameLogic.Entities.Entity").GetMethod("Teleport", All).Invoke(_player, new object[] { v, true });
-            _player.GetType().GetMethod("Respawn", All, null, Type.EmptyTypes, null).Invoke(_player, null);
+            _player.GetType().GetField(R.Name("Map.Position"), All).SetValue(_player, v);
+            R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(_player, new object[] { v, true });
+            _player.GetType().GetMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(_player, null);
             _diedAt = -1f;
-            _log("scout: the player respawned at " + Fmt(at) + ", Health " + ServerHooks.GetStat(_player, "Health"));
+            _log("scout: the player respawned at " + Fmt(at) + ", Health " + ServerHooks.GetStat(_player, R.Name("Stat.Health")));
         }
 
         // ---- win ----
 
-        /// <summary>Delivered >= goal: GameMode.IsCompleted, then TeamFinished (GameMessage 4: team 3 bits, placement 3 bits, finished now).</summary>
+        /// <summary>Delivered >= goal: ActiveMode.IsCompleted, then team finished (MatchMessage 4: team 3 bits, placement 3 bits, finished now).</summary>
         private void Win()
         {
             _won = true;
             Step = "won";
-            _g.GameMode.GetType().GetProperty("IsCompleted", All).SetValue(_g.GameMode, true, null);
-            ServerHooks.SyncNow = true;   // IsCompleted in the same frame as TeamFinished
-            int team = Convert.ToInt32(_player.GetType().GetProperty("TeamId", All).GetValue(_player, null));
-            ServerHooks.SendGameMessage(TeamFinishedMessage, m => { m.WriteBits((uint)team, 3); m.WriteBits(0u, 3); m.Write(true); });
-            _log("scout: mission complete, team delivered " + TeamSupplies() + " of " + Goal + "; IsCompleted, sent TeamFinished(team " + team + ", First)");
+            _g.ActiveMode.GetType().GetProperty("IsCompleted", All).SetValue(_g.ActiveMode, true, null);
+            ServerHooks.SyncNow = true;   // IsCompleted in the same frame as team finished
+            int team = Convert.ToInt32(_player.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(_player, null));
+            ServerHooks.SendMatchMessage(TeamFinishedMessage, m => { m.WriteBits((uint)team, 3); m.WriteBits(0u, 3); m.Write(true); });
+            _log("scout: mission complete, team delivered " + SuppliesBanked() + " of " + Goal + "; IsCompleted, sent team finished(team " + team + ", First)");
             if (OnWon != null) OnWon();
         }
 
@@ -640,10 +640,10 @@ namespace EpidemicServer.Match
         {
             switch (e)
             {
-                case 17: return "ScoutCaptureFlag";
-                case 18: return "ScoutKillLooter";
-                case 19: return "ScoutStealSupplies";
-                case 20: return "ScoutReturnToTruck";
+                case 17: return R.Name("Mission.Flag");
+                case 18: return R.Name("Mission.Looter");
+                case 19: return R.Name("Mission.Steal");
+                case 20: return R.Name("Mission.Return");
                 default: return e.ToString();
             }
         }
@@ -674,7 +674,7 @@ namespace EpidemicServer.Match
 
         private static bool Destroyed(object o)
         {
-            return (bool)o.GetType().GetProperty("IsDead", All).GetValue(o, null) || !(bool)o.GetType().GetProperty("IsActive", All).GetValue(o, null);
+            return (bool)o.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(o, null) || !(bool)o.GetType().GetProperty("IsActive", All).GetValue(o, null);
         }
 
         private static float Distance(float[] a, float[] b)

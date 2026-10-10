@@ -5,12 +5,12 @@ using System.Text;
 
 namespace EpidemicServer.Protocol
 {
-    /// <summary>A gadget (trinket) item: GUID, gadget id, rolled stats (ConductorCrafting.Gadget).</summary>
+    /// <summary>A gadget (trinket) item: GUID, gadget id, rolled stats (Gadget).</summary>
     public sealed class OwnedGadget
     {
         public byte[] Guid = new byte[16];
         public ushort GadgetId;
-        public bool IsInInventory = true;
+        public bool InBag = true;
         public byte[] Stats = new byte[0];
     }
 
@@ -29,13 +29,13 @@ namespace EpidemicServer.Protocol
         public static ushort[] Consumables = new ushort[0];
         public static ushort[] Designs = new ushort[0];
         public static ushort[] GadgetBlueprints = new ushort[0];
-        /// <summary>One rolled gadget per gadget id (stats from the game's own Gadget.GenerateTrinket).</summary>
+        /// <summary>One rolled gadget per gadget id (stats from the game's own Craft.MakeGadget).</summary>
         public static readonly Dictionary<ushort, byte[]> GadgetStats = new Dictionary<ushort, byte[]>();
-        /// <summary>Every weapon schematic's WeaponType (ItemSchematic.WeaponType), Debug ones included.</summary>
+        /// <summary>Every weapon schematic's Craft.WeaponKind (Craft.WeaponKind), Debug ones included.</summary>
         public static readonly Dictionary<ushort, int> WeaponTypes = new Dictionary<ushort, int>();
-        /// <summary>Each consumable's own stack size (StructuredConsumable.Stacks).</summary>
+        /// <summary>Each consumable's own stack size (structured-consumable.Stacks).</summary>
         public static readonly Dictionary<ushort, int> ConsumableStacks = new Dictionary<ushort, int>();
-        /// <summary>Stack caps per StackableType (CraftingManager.GetMaxStackableForType); missing = no cap known.</summary>
+        /// <summary>Stack caps per stackable type (Craft.StackCap); missing = no cap known.</summary>
         public static readonly Dictionary<int, int> MaxStack = new Dictionary<int, int>();
         public static int MaxLevel;
         public static uint MaxLevelXp;
@@ -80,12 +80,12 @@ namespace EpidemicServer.Protocol
             Account v = new Account
             {
                 UserId = real.UserId, SteamId = real.SteamId, Name = real.Name, Language = real.Language,
-                Gold = real.Gold, Silver = real.Silver, CharacterPoints = real.CharacterPoints, ResearchPoints = real.ResearchPoints,
-                StoryMapXp = EffectiveXp(real), StoryMapVersion = real.StoryMapVersion, RegularBoost = real.RegularBoost,
-                PremiumBoost = real.PremiumBoost, UnboundXp = real.UnboundXp, CreateTime = real.CreateTime, VanityIcon = real.VanityIcon,
-                UnlockedDlc = real.UnlockedDlc, LastPremiumGain = real.LastPremiumGain, LastScavengerWinBonusTime = real.LastScavengerWinBonusTime,
-                LastHordeWinBonusTime = real.LastHordeWinBonusTime, CounterData = real.CounterData, CrossroadProgress = real.CrossroadProgress,
-                FirstLogin = real.FirstLogin, TutorialCompleted = real.TutorialCompleted,
+                Gold = real.Gold, Silver = real.Silver, HeroPoints = real.HeroPoints, LabPoints = real.LabPoints,
+                StoryMapXp = EffectiveXp(real), UnlockTreeVersion = real.UnlockTreeVersion, BoostNormal = real.BoostNormal,
+                BoostPaid = real.BoostPaid, UnboundXp = real.UnboundXp, CreateTime = real.CreateTime, ProfileIcon = real.ProfileIcon,
+                UnlockedDlc = real.UnlockedDlc, LastPaidGain = real.LastPaidGain, LastScavengerBonus = real.LastScavengerBonus,
+                LastHordeBonus = real.LastHordeBonus, Counters = real.Counters, CrossroadsState = real.CrossroadsState,
+                FirstSignIn = real.FirstSignIn, TutorialCompleted = real.TutorialCompleted,
                 UnlockAll = real.UnlockAll, MaxLevel = real.MaxLevel, UnlimitedCurrency = real.UnlimitedCurrency,
             };
             v.Nodes.AddRange(real.Nodes);
@@ -98,8 +98,8 @@ namespace EpidemicServer.Protocol
             {
                 v.Gold = Math.Max(v.Gold, UnlimitedAmount);
                 v.Silver = Math.Max(v.Silver, UnlimitedAmount);
-                v.CharacterPoints = Math.Max(v.CharacterPoints, UnlimitedAmount);
-                v.ResearchPoints = Math.Max(v.ResearchPoints, UnlimitedAmount);
+                v.HeroPoints = Math.Max(v.HeroPoints, UnlimitedAmount);
+                v.LabPoints = Math.Max(v.LabPoints, UnlimitedAmount);
             }
             if (real.UnlockAll && UnlockCatalog.Ready)
             {
@@ -133,7 +133,7 @@ namespace EpidemicServer.Protocol
             return v;
         }
 
-        /// <summary>StackableType values (ConductorCrafting.StackableType).</summary>
+        /// <summary>stackable type values (stackable type).</summary>
         public const int StackConsumable = 1, StackSchematic = 2, StackPart = 3, StackGadgetBlueprint = 6, StackDesign = 7;
 
         private static void AtLeast(Account a, ushort id, int type, int amount)

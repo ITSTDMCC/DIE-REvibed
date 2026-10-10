@@ -6,6 +6,7 @@ using System;
 using System.Collections;
 using System.Linq;
 using System.Reflection;
+using EpidemicServer.Resolve;
 using EpidemicServer.Match;
 
 public static class CatalogProbe
@@ -20,9 +21,9 @@ public static class CatalogProbe
         {
             GameRuntime game = GameRuntime.Load(install);
             game.Start(line => { });
-            Type cm = game.Crafting("ConductorCrafting.CraftingManager");
-            Console.WriteLine("crafting data loaded: " + cm.GetProperty("HasLoadedData", all).GetValue(null, null) + ", max weapon tier " + cm.GetProperty("MaxWeaponTier", all).GetValue(null, null));
-            foreach (string name in new[] { "WeaponSchematics", "Trinkets", "Parts", "Consumables", "Designs", "ItemPerks" })
+            Type cm = R.Type("Type.Crafting");
+            Console.WriteLine("crafting data loaded: " + cm.GetProperty(R.Name("Craft.Loaded"), all).GetValue(null, null) + ", max weapon tier " + cm.GetProperty(R.Name("Craft.TopTier"), all).GetValue(null, null));
+            foreach (string name in new[] { R.Name("Craft.Weapons"), R.Name("Craft.Gadgets"), R.Name("Craft.Parts"), R.Name("Craft.Consumables"), R.Name("Craft.Designs"), R.Name("Craft.Perks") })
             {
                 Array a = (Array)cm.GetField(name, all).GetValue(null);
                 Console.WriteLine("== " + name + ": " + (a == null ? "null" : a.Length.ToString()));
@@ -39,15 +40,15 @@ public static class CatalogProbe
                     Console.WriteLine("  " + string.Join(" ", parts.ToArray()) + tagText);
                 }
             }
-            Type alh = game.Crafting("ConductorCrafting.AccountLevelHelpers");
-            foreach (MethodInfo m in alh.GetMethods(all).Where(x => x.Name == "LevelRequiredForCraftingTier"))
+            Type alh = R.Type("Type.Levels");
+            foreach (MethodInfo m in alh.GetMethods(all).Where(x => x.Name == R.Name("Craft.TierLevel")))
             {
                 Type pt = m.GetParameters()[0].ParameterType;
                 var vals = pt.IsEnum ? Enum.GetValues(pt).Cast<object>().ToArray() : Enumerable.Range(0, 20).Cast<object>().ToArray();
-                Console.WriteLine("LevelRequiredForCraftingTier(" + pt.Name + "): " + string.Join(" ", vals.Select(x => { try { return x + "=" + m.Invoke(null, new[] { x }); } catch (Exception e) { return x + "=!" + GameRuntime.Unwrap(e).GetType().Name; } }).ToArray()));
+                Console.WriteLine("Craft.TierLevel(" + pt.Name + "): " + string.Join(" ", vals.Select(x => { try { return x + "=" + m.Invoke(null, new[] { x }); } catch (Exception e) { return x + "=!" + GameRuntime.Unwrap(e).GetType().Name; } }).ToArray()));
             }
-            var lvRewards = (Array)alh.GetField("Rewards", all).GetValue(null);
-            Console.WriteLine("reward table levels: " + string.Join(",", lvRewards.Cast<object>().Select(r => r.GetType().GetField("LevelRequirement").GetValue(r).ToString()).ToArray()));
+            var lvRewards = (Array)alh.GetField(R.Name("Record.Rewards"), all).GetValue(null);
+            Console.WriteLine("reward table levels: " + string.Join(",", lvRewards.Cast<object>().Select(r => r.GetType().GetField(R.Name("Craft.MinLevel")).GetValue(r).ToString()).ToArray()));
             Console.WriteLine("unlock catalog: " + UnlockCatalogBuilder.Build(game, 1));
             EpidemicServer.Protocol.Account acct = new EpidemicServer.Protocol.Account { UnlockAll = true, MaxLevel = true, UnlimitedCurrency = true };
             EpidemicServer.Protocol.Inventory.EnsureStartingItems(acct);
@@ -55,12 +56,12 @@ public static class CatalogProbe
             Console.WriteLine("view: " + v.Characters.Count + " characters, " + v.Uniques.Count + " weapons, " + v.Gadgets.Count + " gadgets, " + v.Stackables.Count +
                               " stacks, XP " + v.StoryMapXp + ", gold " + v.Gold + "; login data " + EpidemicServer.Protocol.RequestServerEncoders.LoginData(acct, new byte[16], new byte[16], 0).Length +
                               " bytes, features " + string.Join(",", EpidemicServer.Protocol.RequestServerEncoders.CurrentDisabledFeatures().Select(x => x.ToString()).ToArray()));
-            // Decode our replies with the game's own deserializers (GameProtocol.MessageSerialization).
-            Decode(game, "LoginDataMessage", EpidemicServer.Protocol.RequestServerEncoders.LoginData(acct, new byte[16], new byte[16], 0));
-            Decode(game, "GetInventoryResponse", EpidemicServer.Protocol.RequestServerEncoders.InventoryResponse(acct));
-            Decode(game, "GetCurrencyResult", EpidemicServer.Protocol.RequestServerEncoders.CurrencyResponse(acct));
-            Decode(game, "GetStoryMapResponse", EpidemicServer.Protocol.CatalogueEncoders.StoryMapResponse(EpidemicServer.Protocol.AccountView.For(acct).StoryMapData));
-            foreach (string m in new[] { "GetDroppableWeapons", "GetDroppableGadgets", "GetDroppableDesigns" })
+            // Decode our replies with the game's own deserializers (Serializer).
+            Decode(game, R.Name("Proto.LoginData"), EpidemicServer.Protocol.RequestServerEncoders.LoginData(acct, new byte[16], new byte[16], 0));
+            Decode(game, R.Name("Proto.Inventory"), EpidemicServer.Protocol.RequestServerEncoders.InventoryResponse(acct));
+            Decode(game, R.Name("Proto.Currency"), EpidemicServer.Protocol.RequestServerEncoders.CurrencyResponse(acct));
+            Decode(game, R.Name("Proto.UnlockTree"), EpidemicServer.Protocol.CatalogueEncoders.StoryMapResponse(EpidemicServer.Protocol.AccountView.For(acct).UnlockTreeData));
+            foreach (string m in new[] { R.Name("Craft.DropWeapons"), R.Name("Craft.DropGadgets"), R.Name("Craft.DropDesigns") })
                 Console.WriteLine(m + ": " + ((ICollection)cm.GetMethod(m, all).Invoke(null, null)).Count);
             return 0;
         }
@@ -70,7 +71,7 @@ public static class CatalogProbe
     private static void Decode(GameRuntime game, string typeName, byte[] bytes)
     {
         const BindingFlags all = GameRuntime.All;
-        Type ser = game.Game("GameProtocol.MessageSerialization");
+        Type ser = R.Type("Type.Serializer");
         MethodInfo de = ser.GetMethods(BindingFlags.Public | BindingFlags.Static).FirstOrDefault(m => m.Name == "Deserialize" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType.GetElementType().Name == typeName);
         if (de == null) { Console.WriteLine("decode " + typeName + ": the game has no deserializer by that name"); return; }
         Type t = de.GetParameters()[0].ParameterType.GetElementType();

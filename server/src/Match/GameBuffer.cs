@@ -34,7 +34,7 @@ namespace EpidemicServer.Match
             _factory = factoryType.GetConstructor(GameRuntime.All, null, new[] { typeof(bool), typeof(int) }, null)
                 .Invoke(new object[] { false, 4 });
             _create = factoryType.GetMethod(R.Name("NetBufferFactory.Create"), GameRuntime.All);
-            _inputCreator = (Delegate)game.Game("StunGameNetwork.LidgrenNetBuffer").GetField(R.Name("NetBuffer.InputCreator"), GameRuntime.All).GetValue(null);
+            _inputCreator = (Delegate)R.Type("Type.NetBuffer").GetField(R.Name("NetBuffer.InputCreator"), GameRuntime.All).GetValue(null);
         }
 
         /// <summary>An empty buffer for writing (the game's outgoing message type).</summary>

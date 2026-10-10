@@ -7,10 +7,10 @@ using System.Security;
 namespace EpidemicServer.Protocol
 {
     /// <summary>
-    /// The hub's welcome popup (WelcomeDataManager) loads a small XML list from LoginDataMessage.WelcomeDataURL:
+    /// The hub's welcome popup (welcome data manager) loads a small XML list from welcome data URL:
     /// a root whose baseURL is prefixed to each entry's image unless it starts with http(s)://, Language
     /// groups (id "all" for everyone), and one element per page with image, time (seconds), action,
-    /// tooltip (WelcomeDataManager.ParseEntry). We serve one page: a title card drawn here with plain text
+    /// tooltip (parse entry). We serve one page: a title card drawn here with plain text
     /// and shapes (no game art), both files written next to the server, outside the repository.
     /// </summary>
     public static class WelcomeCard
@@ -30,10 +30,10 @@ namespace EpidemicServer.Protocol
             foreach (string old in Directory.GetFiles(folder, "welcome*.png")) try { File.Delete(old); } catch (IOException) { }
             DrawCard(Path.Combine(folder, name));
             string baseUrl = new Uri(folder.TrimEnd('\\', '/') + Path.DirectorySeparatorChar).AbsoluteUri;
-            string xml = "<WelcomeData baseURL=\"" + SecurityElement.Escape(baseUrl) + "\">" +
+            string xml = "<welcome baseURL=\"" + SecurityElement.Escape(baseUrl) + "\">" +
                          "<Language id=\"all\">" +
                          "<Entry image=\"" + name + "\" time=\"30\" action=\"None\" tooltip=\"" + SecurityElement.Escape(Subtitle) + "\" />" +
-                         "</Language></WelcomeData>";
+                         "</Language></welcome>";
             string path = Path.Combine(folder, "welcome.xml");
             File.WriteAllText(path, xml);   // no XML declaration: the hub reads the document's first child as the root
             return new Uri(path).AbsoluteUri;
@@ -41,7 +41,7 @@ namespace EpidemicServer.Protocol
 
         private static void DrawCard(string path)
         {
-            // The hub keeps a downloaded page only if it is exactly 810 x 477 (WelcomeDataManager.LoadTexture);
+            // The hub keeps a downloaded page only if it is exactly 810 x 477 (load texture);
             // anything else goes to its TGA fallback, which can't read a PNG.
             const int width = 810, height = 477;
             using (Bitmap bmp = new Bitmap(width, height))

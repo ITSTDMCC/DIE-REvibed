@@ -35,11 +35,11 @@ namespace EpidemicServer.Protocol
                     case "steamId": a.SteamId = ulong.Parse(value, CultureInfo.InvariantCulture); break;
                     case "gold": a.Gold = Int(value); break;
                     case "silver": a.Silver = Int(value); break;
-                    case "characterPoints": a.CharacterPoints = Int(value); break;
-                    case "researchPoints": a.ResearchPoints = Int(value); break;
+                    case "characterPoints": a.HeroPoints = Int(value); break;
+                    case "researchPoints": a.LabPoints = Int(value); break;
                     case "storyMapXp": a.StoryMapXp = (uint)Int(value); break;
                     case "createTime": a.CreateTime = long.Parse(value, CultureInfo.InvariantCulture); break;
-                    case "firstLogin": a.FirstLogin = value == "true"; break;
+                    case "firstLogin": a.FirstSignIn = value == "true"; break;
                     case "tutorialCompleted": a.TutorialCompleted = value == "true"; break;
                     case "unlockAll": case "maxLevel": case "unlimitedCurrency": SetSwitch(a, key, value); break;
                     case "node": a.Nodes.Add(ParseNode(value)); break;
@@ -91,11 +91,11 @@ namespace EpidemicServer.Protocol
             if (a.SteamId != 0) s.AppendLine("steamId=" + a.SteamId.ToString(CultureInfo.InvariantCulture));
             s.AppendLine("gold=" + Str(a.Gold));
             s.AppendLine("silver=" + Str(a.Silver));
-            s.AppendLine("characterPoints=" + Str(a.CharacterPoints));
-            s.AppendLine("researchPoints=" + Str(a.ResearchPoints));
+            s.AppendLine("characterPoints=" + Str(a.HeroPoints));
+            s.AppendLine("researchPoints=" + Str(a.LabPoints));
             s.AppendLine("storyMapXp=" + a.StoryMapXp.ToString(CultureInfo.InvariantCulture));
             s.AppendLine("createTime=" + a.CreateTime.ToString(CultureInfo.InvariantCulture));
-            s.AppendLine("firstLogin=" + (a.FirstLogin ? "true" : "false"));
+            s.AppendLine("firstLogin=" + (a.FirstSignIn ? "true" : "false"));
             s.AppendLine("tutorialCompleted=" + (a.TutorialCompleted ? "true" : "false"));
             s.AppendLine("# Preservation switches (true/false); they take effect at the next hub login.");
             s.AppendLine("unlockAll=" + (a.UnlockAll ? "true" : "false"));
@@ -106,7 +106,7 @@ namespace EpidemicServer.Protocol
             {
                 List<string> choices = new List<string>();
                 foreach (byte c in n.Choices) choices.Add(c.ToString(CultureInfo.InvariantCulture));
-                s.AppendLine("node=" + Str(n.Id) + ":" + n.UnlockedTimes.ToString(CultureInfo.InvariantCulture) + ":" + string.Join(",", choices.ToArray()));
+                s.AppendLine("node=" + Str(n.Id) + ":" + n.TimesUnlocked.ToString(CultureInfo.InvariantCulture) + ":" + string.Join(",", choices.ToArray()));
             }
             // character=<id>:<owned>:<xp>
             foreach (OwnedCharacter c in a.Characters)
@@ -114,9 +114,9 @@ namespace EpidemicServer.Protocol
             // unique=<guid hex>:<schematic id>:<in inventory>:<durability>:<ep>
             foreach (OwnedUnique u in a.Uniques)
                 s.AppendLine("unique=" + BitConverter.ToString(u.Guid).Replace("-", "") + ":" + u.SchematicId.ToString(CultureInfo.InvariantCulture) + ":" +
-                             (u.IsInInventory ? "true" : "false") + ":" + Str(u.Durability) + ":" + Str(u.Ep));
+                             (u.InBag ? "true" : "false") + ":" + Str(u.Durability) + ":" + Str(u.Ep));
 
-            // stackable=<id>:<StackableType>:<amount>
+            // stackable=<id>:<stackable type>:<amount>
             foreach (OwnedStackable st in a.Stackables)
                 s.AppendLine("stackable=" + st.Id.ToString(CultureInfo.InvariantCulture) + ":" + Str(st.Type) + ":" + Str(st.Amount));
 
@@ -131,7 +131,7 @@ namespace EpidemicServer.Protocol
             string[] parts = value.Split(':');
             StoryMapNode n = new StoryMapNode();
             n.Id = Int(parts[0]);
-            n.UnlockedTimes = byte.Parse(parts[1], CultureInfo.InvariantCulture);
+            n.TimesUnlocked = byte.Parse(parts[1], CultureInfo.InvariantCulture);
             if (parts.Length > 2 && parts[2].Length > 0)
                 foreach (string c in parts[2].Split(','))
                     n.Choices.Add(byte.Parse(c, CultureInfo.InvariantCulture));
@@ -156,7 +156,7 @@ namespace EpidemicServer.Protocol
             for (int i = 0; i < u.Guid.Length; i++)
                 u.Guid[i] = byte.Parse(parts[0].Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             u.SchematicId = ushort.Parse(parts[1], CultureInfo.InvariantCulture);
-            u.IsInInventory = parts[2] == "true";
+            u.InBag = parts[2] == "true";
             u.Durability = Int(parts[3]);
             u.Ep = Int(parts[4]);
             return u;

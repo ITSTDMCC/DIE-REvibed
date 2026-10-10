@@ -5,10 +5,10 @@ using EpidemicServer.Wire;
 namespace EpidemicServer.Protocol
 {
     /// <summary>
-    /// The character and gear the hub queued with (GetMatchmakingTicketRequest, sent before every queue and
-    /// solo match). The request is a list of ConductorCrafting.PlayerQueueData; read field by field, checked
+    /// The character and gear the hub queued with (MatchTicket, sent before every queue and
+    /// solo match). The request is a list of player queue data; read field by field, checked
     /// against a logged request (the player, paddle 1005 + pistol 1009, two empty gadget slots):
-    /// varint count; per player: varint user id, varint CharacterEnum, varint count + bytes per equipped weapon
+    /// varint count; per player: varint user id, varint HeroId, varint count + bytes per equipped weapon
     /// GUID, varint count + varint per consumable id, varint count + bytes per gadget GUID, ushort vanity title,
     /// ushort vanity icon, varint count + varint per queue flag, varint starter-quest node, bytes login session,
     /// ushort queued Crossroads difficulty.
@@ -25,12 +25,12 @@ namespace EpidemicServer.Protocol
         /// <summary>The last loadout the hub queued with (null until one arrives).</summary>
         public static volatile MatchLoadout Current;
 
-        /// <summary>WeaponType values (ConductorCrafting.WeaponType): 1 Fists, 2 Light, 3 Heavy are melee; 4-6 ranged.</summary>
+        /// <summary>Craft.WeaponKind values (Craft.WeaponKind): 1 Fists, 2 Light, 3 Heavy are melee; 4-6 ranged.</summary>
         public static bool IsMelee(int weaponType) { return weaponType >= 1 && weaponType <= 3; }
 
         /// <summary>
         /// Reads the first player of a ticket request and resolves its GUIDs against the account as the hub sees
-        /// it (AccountView, so unlock-all items count). weaponType maps a weapon schematic id to its WeaponType.
+        /// it (AccountView, so unlock-all items count). weaponType maps a weapon schematic id to its Craft.WeaponKind.
         /// </summary>
         public static MatchLoadout Read(byte[] body, Account view, Func<ushort, int> weaponType, out string text)
         {

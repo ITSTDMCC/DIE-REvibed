@@ -15,8 +15,8 @@ namespace EpidemicServer.Services
     /// </summary>
     public sealed class MatchService : ILinkHandler
     {
-        public const ushort GameplayAuthRequest = 5;
-        public const ushort GameplayData = 38;
+        public const ushort MatchSignIn = 5;
+        public const ushort MatchFrame = 38;
 
         private const int FrameIntervalMs = 100;
         /// <summary>With the game logic running, client frames vary with input; log only the first few distinct ones.</summary>
@@ -65,12 +65,12 @@ namespace EpidemicServer.Services
         public void OnPacket(Connection c, Packet p)
         {
             Session s = (Session)c.State;
-            if (p.Kind == PacketKind.Request && p.Type == GameplayAuthRequest)
+            if (p.Kind == PacketKind.Request && p.Type == MatchSignIn)
             {
                 HandleGameplayAuth(c, p, s);
                 return;
             }
-            if (p.Type == GameplayData && p.Kind != PacketKind.Request)
+            if (p.Type == MatchFrame && p.Kind != PacketKind.Request)
             {
                 string hex = p.Body.Length == 0 ? "(empty)" : BitConverter.ToString(p.Body);
                 lock (s)
@@ -89,7 +89,7 @@ namespace EpidemicServer.Services
             }
             Log.Warn("match: unimplemented " + p.Kind + " type " + p.Type + " body " + BitConverter.ToString(p.Body));
             if (p.Kind == PacketKind.Request)
-                c.Respond(p.RequestId, RequestResult.UnrecognizedError, null);
+                c.Respond(p.RequestId, ResultCode.Unrecognised, null);
         }
 
         private void HandleGameplayAuth(Connection c, Packet p, Session s)
@@ -120,7 +120,7 @@ namespace EpidemicServer.Services
             WireWriter w = new WireWriter();
             w.WriteVarInt32(GameplayAuthSuccess);
             w.WriteBytes(serverHail);
-            c.Respond(p.RequestId, RequestResult.OK, w.ToArray());
+            c.Respond(p.RequestId, ResultCode.OK, w.ToArray());
             if (_host != null)
             {
                 // The game logic sends the frames from now on.
@@ -129,7 +129,7 @@ namespace EpidemicServer.Services
                 {
                     WireWriter fw = new WireWriter();
                     fw.WriteBytes(frame);
-                    try { c.SendMessage(GameplayData, fw.ToArray()); } catch (Exception) { }  // the receive loop notices
+                    try { c.SendMessage(MatchFrame, fw.ToArray()); } catch (Exception) { }  // the receive loop notices
                 });
                 s.Attached = true;
                 return;

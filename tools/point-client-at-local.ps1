@@ -19,9 +19,10 @@ if (-not (Test-Path $backup)) { Copy-Item $cfg $backup }
 [xml]$xml = Get-Content $cfg
 $branch = $xml.root.branch | Where-Object { $_.name -eq "public" }
 if (-not $branch) { Write-Error "No 'public' branch in ip.cfg"; exit 1 }
-foreach ($name in "RequestServerIP", "MatchmakingServerIPEU", "MatchmakingServerIPNA", "StatsServerIP") {
-    $node = $branch.SelectSingleNode($name)
-    if ($node) { $node.InnerText = $Address }
+# Every entry of the public branch is a server address (request, matchmaking and stats hosts):
+# point each one at this PC, whatever the entries are called.
+foreach ($node in $branch.ChildNodes) {
+    if ($node.NodeType -eq [System.Xml.XmlNodeType]::Element) { $node.InnerText = $Address }
 }
 $xml.Save($cfg)
 Write-Host "ip.cfg now points at $Address (original saved as ip.cfg.original)"

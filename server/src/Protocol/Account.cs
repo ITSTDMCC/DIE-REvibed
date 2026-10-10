@@ -14,8 +14,8 @@ namespace EpidemicServer.Protocol
         // Currencies
         public int Gold;
         public int Silver = 1000;
-        public int CharacterPoints;
-        public int ResearchPoints;
+        public int HeroPoints;
+        public int LabPoints;
 
         // Account progress
         public uint StoryMapXp;
@@ -24,21 +24,21 @@ namespace EpidemicServer.Protocol
         public readonly List<OwnedUnique> Uniques = new List<OwnedUnique>();
         public readonly List<OwnedStackable> Stackables = new List<OwnedStackable>();
         public readonly List<OwnedGadget> Gadgets = new List<OwnedGadget>();
-        public byte[] StoryMapData { get { return StoryMapRules.Encode(Nodes, Characters); } }
-        public byte StoryMapVersion;
-        public long RegularBoost;
-        public long PremiumBoost;
+        public byte[] UnlockTreeData { get { return StoryMapRules.Encode(Nodes, Characters); } }
+        public byte UnlockTreeVersion;
+        public long BoostNormal;
+        public long BoostPaid;
         public uint UnboundXp;
         public long CreateTime;
-        public byte VanityIcon;
+        public byte ProfileIcon;
         public uint UnlockedDlc;
-        public long LastPremiumGain;
-        public long LastScavengerWinBonusTime;
-        public long LastHordeWinBonusTime;
-        public byte[] CounterData = new byte[0];
-        public ushort CrossroadProgress;
+        public long LastPaidGain;
+        public long LastScavengerBonus;
+        public long LastHordeBonus;
+        public byte[] Counters = new byte[0];
+        public ushort CrossroadsState;
 
-        public bool FirstLogin = true;
+        public bool FirstSignIn = true;
         /// <summary>Ours: set when the local match server's tutorial reaches its last stage (24).</summary>
         public bool TutorialCompleted;
 

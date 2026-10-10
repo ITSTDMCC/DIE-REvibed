@@ -1,9 +1,10 @@
 using System;
+using EpidemicServer.Resolve;
 
 namespace EpidemicServer.Match
 {
     /// <summary>
-    /// The server hail sent in reply to GameplayAuthRequest, per the owner's
+    /// The server hail sent in reply to MatchSignIn, per the owner's
     /// design (2026-10-06): a net-debug flag, the client index, the client info,
     /// then the game info last.
     /// </summary>
@@ -38,7 +39,7 @@ namespace EpidemicServer.Match
 
         /// <summary>
         /// The same hail with the client info written by the game's own
-        /// Client.ClientInfoServerToClientSerialize, so the server's client
+        /// Net.WriteClientInfo, so the server's client
         /// object and what the client is told stay in step. The client must
         /// already have its player (PrepareLocalPlayer).
         /// </summary>
@@ -47,7 +48,7 @@ namespace EpidemicServer.Match
             GameBuffer b = GameBuffer.Create();
             b.Write(false);              // net debug
             b.Write(clientIndex);
-            client.GetType().GetMethod("ClientInfoServerToClientSerialize", GameRuntime.All).Invoke(client, new[] { b.Buffer, (object)true });
+            client.GetType().GetMethod(R.Name("Net.WriteClientInfo"), GameRuntime.All).Invoke(client, new[] { b.Buffer, (object)true });
             WriteGameInfo(b, gameInfo);
             return b.ToBytes();
         }

@@ -11,6 +11,32 @@ The terms used below:
 
 ---
 
+## v0.3: readable names behind roles too (2026-10-10)
+
+- **Why.** v0.2 removed the game's scrambled names, but the code still used the game's
+  readable names: about 350 class, method, field and enum value names, such as the
+  game's world manager or a stat type.
+- **Name roles.** Each readable name the server needs is now a role, stored with a salted
+  one-way hash of the name. At start-up the server hashes every readable name in the
+  installed game and matches them. The role table holds 584 roles; every one resolves
+  against 0.8.5.38860.
+- **Our own names.** About 160 of our own identifiers had copied the game's names, mostly
+  protocol message and field names. They now use our own words. Role names were checked
+  too, and none repeats a game identifier.
+- **Comments and docs** describe the game's code in plain words or by role name.
+- **`ip.cfg`.** The setup script no longer names the file's entries. It points every
+  entry of the public branch at this PC.
+- **Tests.** The story-map and weapon checks now load the game by reflection through
+  roles. The end-to-end reference test compiled directly against the game's libraries, so
+  it was moved out of the repository and stays on the developer's PC.
+- **Left as they are.** DLL file names (needed to load the libraries), map names, our
+  own plain-English labels, generic programming names that happen to match (for example
+  `IsDead` or `GetStat`), and third-party library names (Lidgren, Farseer).
+- **Checked.** The offline checks pass, and the Horde, Practice and Scavenger probes play
+  full matches through to rewards.
+
+---
+
 ## v0.2: no game names in the repository
 
 - **Why.** v0.1 referred to the game's scrambled class and field names directly in its

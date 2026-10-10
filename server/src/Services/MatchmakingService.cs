@@ -8,27 +8,27 @@ namespace EpidemicServer.Services
 {
     /// <summary>
     /// The matchmaking server (default port 2555).
-    /// - Solo matches (tutorial, practice): SoloServerCreateRequest, answered with our match server's address.
-    /// - Queued matches (Horde): the hub's normal queue flow (MatchmakingProtocol, layouts checked against the
+    /// - Solo matches (tutorial, practice): SoloServer, answered with our match server's address.
+    /// - Queued matches (Horde): the hub's normal queue flow (matchmaking protocol, layouts checked against the
     ///   hub's own serializer), for a one-player party:
-    ///   JoinQueueRequest -> JoinQueueResponse; MatchupFoundMessage; the hub's ReadyForMatchMessage (sent by the
-    ///   lobby owner after its "ready" popup); PlayersReadyCount; FindingServerMessage; ServerFoundMessage (a
-    ///   request from us, answered by an empty ServerFoundAffirmativeMessage), after which the hub starts the
+    ///   JoinQueue -> join queue response; MatchMade; the hub's ConfirmReady (sent by the
+    ///   lobby owner after its "ready" popup); ReadyTally; FindingServer; ServerReady (a
+    ///   request from us, answered by an empty server found affirmative message), after which the hub starts the
     ///   match client against our match server.
     /// </summary>
     public sealed class MatchmakingService : ILinkHandler
     {
-        public const ushort JoinQueueRequest = 1, ServerFoundMessage = 2, ReadyForMatchMessage = 3, MatchupFoundMessage = 4,
-                            FindingServerMessage = 6, LeaveQueueMessage = 7, GetActiveMatchRequest = 9, SoloServerCreateRequest = 10,
-                            PlayersReadyCount = 12;
+        public const ushort JoinQueue = 1, ServerReady = 2, ConfirmReady = 3, MatchMade = 4,
+                            FindingServer = 6, QuitQueue = 7, ActiveMatch = 9, SoloServer = 10,
+                            ReadyTally = 12;
 
         private const int AuthSuccess = 1;
         private const int JoinQueueSuccess = 1;
         /// <summary>
         /// MatchupFound: the number of players who must ready up. The hub draws one ready icon per player, centred
-        /// on this count (GUI_GameFoundPopup.Show(int); Matchmaker.OnMatchupFoundMessage). It was sent as 30 (read as a
+        /// on this count (GUI-game-found-popup.Show(int); on matchup found message). It was sent as 30 (read as a
         /// timeout), so the hub's 12 icons were laid out for 30 and sat off to the left (owner, 2026-10-07). Only the
-        /// owner readies (bots join on the server), and PlayersReadyCount then reports 1 of 1.
+        /// owner readies (bots join on the server), and ReadyTally then reports 1 of 1.
         /// </summary>
         private const int PlayersToReady = 1;
         /// <summary>Horde Normal maps in turn (stand-in: the original matchmaker's map choice is unknown): Outpost, Lab, Club.</summary>
@@ -69,15 +69,15 @@ namespace EpidemicServer.Services
 
         public void OnPacket(Connection c, Packet p)
         {
-            if (p.Kind == PacketKind.Request && p.Type == SoloServerCreateRequest)
+            if (p.Kind == PacketKind.Request && p.Type == SoloServer)
             {
                 Log.Info("matchmaking: type " + p.Type);
-                c.Respond(p.RequestId, RequestResult.OK, HandleSoloServerCreate(p));
+                c.Respond(p.RequestId, ResultCode.OK, HandleSoloServerCreate(p));
                 return;
             }
-            if (p.Kind == PacketKind.Request && p.Type == GetActiveMatchRequest)
+            if (p.Kind == PacketKind.Request && p.Type == ActiveMatch)
             {
-                // No running match to rejoin: AuthResult Success, HasMatch false, AFK false, empty address, port 0, empty GUID.
+                // No running match to rejoin: SignInResult Success, has match false, AFK false, empty address, port 0, empty GUID.
                 WireWriter w = new WireWriter();
                 w.WriteVarInt32(AuthSuccess);
                 w.WriteBool(false);
@@ -85,21 +85,21 @@ namespace EpidemicServer.Services
                 w.WriteBytes(new byte[0]);
                 w.WriteUInt16(0);
                 w.WriteBytes(new byte[0]);
-                c.Respond(p.RequestId, RequestResult.OK, w.ToArray());
+                c.Respond(p.RequestId, ResultCode.OK, w.ToArray());
                 Log.Info("matchmaking: get active match: none");
                 return;
             }
-            if (p.Kind == PacketKind.Request && p.Type == JoinQueueRequest)
+            if (p.Kind == PacketKind.Request && p.Type == JoinQueue)
             {
                 HandleJoinQueue(c, p);
                 return;
             }
-            if (p.Kind == PacketKind.Message && p.Type == ReadyForMatchMessage)
+            if (p.Kind == PacketKind.Message && p.Type == ConfirmReady)
             {
                 HandleReady(c, p);
                 return;
             }
-            if (p.Kind == PacketKind.Message && p.Type == LeaveQueueMessage)
+            if (p.Kind == PacketKind.Message && p.Type == QuitQueue)
             {
                 QueueState q = c.State as QueueState;
                 if (q != null && q.Timer != null) q.Timer.Dispose();
@@ -114,10 +114,10 @@ namespace EpidemicServer.Services
             }
             Log.Warn("matchmaking: unimplemented " + p.Kind + " type " + p.Type + " body " + BitConverter.ToString(p.Body));
             if (p.Kind == PacketKind.Request)
-                c.Respond(p.RequestId, RequestResult.UnrecognizedError, null);
+                c.Respond(p.RequestId, ResultCode.Unrecognised, null);
         }
 
-        /// <summary>AuthData as the hub writes it: session ticket, four version numbers, branch, auth value.</summary>
+        /// <summary>auth data as the hub writes it: session ticket, four version numbers, branch, auth value.</summary>
         private static string ReadAuth(WireReader r)
         {
             r.ReadBytes();
@@ -127,7 +127,7 @@ namespace EpidemicServer.Services
             return major + "." + minor + "." + build + "." + revision + " '" + branch + "'";
         }
 
-        /// <summary>JoinQueueRequest: AuthData, matchmaking ticket, SkillRatingData[] (four varints each), QueueType.</summary>
+        /// <summary>JoinQueue: auth data, matchmaking ticket, skill rating data[] (four varints each), QueueType.</summary>
         private void HandleJoinQueue(Connection c, Packet p)
         {
             WireReader r = new WireReader(p.Body);
@@ -142,7 +142,7 @@ namespace EpidemicServer.Services
             w.WriteVarInt32(AuthSuccess);
             w.WriteVarInt32(JoinQueueSuccess);
             w.WriteVarUInt32(0);   // no time-out data
-            c.Respond(p.RequestId, RequestResult.OK, w.ToArray());
+            c.Respond(p.RequestId, ResultCode.OK, w.ToArray());
 
             QueueState q = new QueueState { QueueType = queueType, MatchGuid = Guid.NewGuid().ToByteArray() };
             c.State = q;
@@ -155,14 +155,14 @@ namespace EpidemicServer.Services
                     m.WriteBytes(q.MatchGuid);
                     m.WriteVarInt32(q.QueueType);
                     m.WriteVarInt32(PlayersToReady);
-                    c.SendMessage(MatchupFoundMessage, m.ToArray());
+                    c.SendMessage(MatchMade, m.ToArray());
                     Log.Info("matchmaking: matchup found for queue " + q.QueueType + " (match " + BitConverter.ToString(q.MatchGuid) + ")");
                 }
                 catch (Exception e) { Log.Warn("matchmaking: could not send the matchup: " + e.Message); }
             }, null, 1500, Timeout.Infinite);
         }
 
-        /// <summary>ReadyForMatchMessage from the lobby owner (ready count, match GUID): ready count, finding server, server found.</summary>
+        /// <summary>ConfirmReady from the lobby owner (ready count, match GUID): ready count, finding server, server found.</summary>
         private void HandleReady(Connection c, Packet p)
         {
             QueueState q = c.State as QueueState;
@@ -178,11 +178,11 @@ namespace EpidemicServer.Services
             WireWriter ready = new WireWriter();
             ready.WriteVarInt32(1);
             ready.WriteBytes(q.MatchGuid);
-            c.SendMessage(PlayersReadyCount, ready.ToArray());
+            c.SendMessage(ReadyTally, ready.ToArray());
 
             WireWriter finding = new WireWriter();
             finding.WriteBytes(q.MatchGuid);
-            c.SendMessage(FindingServerMessage, finding.ToArray());
+            c.SendMessage(FindingServer, finding.ToArray());
 
             int map = PickMap(q.QueueType);
             if (_host != null) _host.RequestMatch(q.QueueType, map);
@@ -193,7 +193,7 @@ namespace EpidemicServer.Services
             found.WriteUInt16(_matchPort);
             found.WriteVarInt32(q.QueueType);
             found.WriteVarInt32(0);   // matchmaking region
-            c.Send(Packet.EncodeRequest(Guid.NewGuid().ToByteArray(), ServerFoundMessage, found.ToArray()));
+            c.Send(Packet.EncodeRequest(Guid.NewGuid().ToByteArray(), ServerReady, found.ToArray()));
             Log.Info("matchmaking: server found for queue " + q.QueueType + ", map " + map + ": " + new IPAddress(_matchAddress) + ":" + _matchPort);
         }
 

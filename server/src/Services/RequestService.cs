@@ -22,25 +22,25 @@ namespace EpidemicServer.Services
         {
             _account = account;
             _store = store;
-            _requests[GameMessageIds.UnlockStoryMapNodeRequest] = HandleUnlockStoryMapNode;
-            _requests[GameMessageIds.GetMatchmakingTicketRequest] = HandleMatchmakingTicket;
-            _requests[GameMessageIds.AuthRequest] = HandleAuth;
-            _requests[GameMessageIds.SteamAuthRequest] = HandleSteamAuth;
-            _requests[GameMessageIds.GetDisabledFeaturesRequest] = delegate (Packet p) { return RequestServerEncoders.DisabledFeaturesResponse(); };
-            _requests[GameMessageIds.GetAccountDataRequest] = delegate (Packet p) { return RequestServerEncoders.AccountDataResponse(_account); };
-            _requests[GameMessageIds.GetInventoryRequest] = delegate (Packet p) { return RequestServerEncoders.InventoryResponse(_account); };
-            _requests[GameMessageIds.GetCurrencyRequest] = delegate (Packet p) { return RequestServerEncoders.CurrencyResponse(_account); };
-            _requests[GameMessageIds.GetShopRequest] = delegate (Packet p) { return CatalogueEncoders.ShopResponse(Now()); };
-            _requests[GameMessageIds.GetStoryMapRequest] = delegate (Packet p) { return CatalogueEncoders.StoryMapResponse(AccountView.For(_account).StoryMapData); };
-            _requests[GameMessageIds.GetRewardSetupRequest] = delegate (Packet p) { return CatalogueEncoders.RewardSetupResponse(); };
-            _requests[GameMessageIds.GetDropTableRequest] = delegate (Packet p) { return CatalogueEncoders.DropTableResponse(); };
-            _requests[GameMessageIds.GetMailDataRequest] = delegate (Packet p) { return CatalogueEncoders.MailDataResponse(); };
-            _requests[GameMessageIds.SetMailDataRequest] = delegate (Packet p) { return CatalogueEncoders.MailDataResponse(); };
-            _requests[GameMessageIds.GetVanityURLRequest] = delegate (Packet p) { return CatalogueEncoders.VanityUrlResponse(); };
-            _requests[GameMessageIds.GetCurrencyISOCodeRequest] = delegate (Packet p) { return CatalogueEncoders.CurrencyIsoCodeResponse(); };
-            _requests[GameMessageIds.BalanceChangeRequest] = delegate (Packet p) { return CatalogueEncoders.BalanceChangeResponse(); };
+            _requests[LinkMessageIds.OpenNode] = HandleUnlockStoryMapNode;
+            _requests[LinkMessageIds.MatchTicket] = HandleMatchmakingTicket;
+            _requests[LinkMessageIds.SignIn] = HandleAuth;
+            _requests[LinkMessageIds.PlatformSignIn] = HandleSteamAuth;
+            _requests[LinkMessageIds.OffFeatureList] = delegate (Packet p) { return RequestServerEncoders.DisabledFeaturesResponse(); };
+            _requests[LinkMessageIds.AccountSheet] = delegate (Packet p) { return RequestServerEncoders.AccountDataResponse(_account); };
+            _requests[LinkMessageIds.BagList] = delegate (Packet p) { return RequestServerEncoders.InventoryResponse(_account); };
+            _requests[LinkMessageIds.Wallet] = delegate (Packet p) { return RequestServerEncoders.CurrencyResponse(_account); };
+            _requests[LinkMessageIds.Shop] = delegate (Packet p) { return CatalogueEncoders.ShopResponse(Now()); };
+            _requests[LinkMessageIds.UnlockTree] = delegate (Packet p) { return CatalogueEncoders.StoryMapResponse(AccountView.For(_account).UnlockTreeData); };
+            _requests[LinkMessageIds.RewardTablesAsk] = delegate (Packet p) { return CatalogueEncoders.RewardSetupResponse(); };
+            _requests[LinkMessageIds.Drops] = delegate (Packet p) { return CatalogueEncoders.DropTableResponse(); };
+            _requests[LinkMessageIds.MailRead] = delegate (Packet p) { return CatalogueEncoders.MailDataResponse(); };
+            _requests[LinkMessageIds.MailWrite] = delegate (Packet p) { return CatalogueEncoders.MailDataResponse(); };
+            _requests[LinkMessageIds.ProfileLink] = delegate (Packet p) { return CatalogueEncoders.VanityUrlResponse(); };
+            _requests[LinkMessageIds.MoneyCodeAsk] = delegate (Packet p) { return CatalogueEncoders.CurrencyIsoCodeResponse(); };
+            _requests[LinkMessageIds.BalanceChange] = delegate (Packet p) { return CatalogueEncoders.BalanceChangeReply(); };
             // Statistics reports: acknowledged with an empty body.
-            foreach (ushort id in new ushort[] { GameMessageIds.UserStateMessage, GameMessageIds.SetUserInputData, GameMessageIds.AddActiveCribTimeMessage })
+            foreach (ushort id in new ushort[] { LinkMessageIds.PresenceNote, LinkMessageIds.UserInput, LinkMessageIds.HubTime })
                 _requests[id] = delegate (Packet p) { return CatalogueEncoders.Empty(); };
         }
 
@@ -62,7 +62,7 @@ namespace EpidemicServer.Services
                 Log.Warn("request: ignoring " + p.Kind + " type " + p.Type + " (" + p.Body.Length + " bytes)");
                 return;
             }
-            if (p.Type == GameMessageIds.LoginRequest)
+            if (p.Type == LinkMessageIds.SignOn)
             {
                 HandleLogin(c, p);
                 return;
@@ -71,18 +71,18 @@ namespace EpidemicServer.Services
             if (_requests.TryGetValue(p.Type, out handler))
             {
                 Log.Info("request: type " + p.Type);
-                c.Respond(p.RequestId, RequestResult.OK, handler(p));
+                c.Respond(p.RequestId, ResultCode.OK, handler(p));
                 return;
             }
             Log.Warn("request: unimplemented type " + p.Type + " body " + BitConverter.ToString(p.Body));
-            c.Respond(p.RequestId, RequestResult.UnrecognizedError, null);
+            c.Respond(p.RequestId, ResultCode.Unrecognised, null);
         }
 
         private void HandleLogin(Connection c, Packet p)
         {
-            LoginRequest req = LoginRequest.Read(new WireReader(p.Body));
-            Log.Info("request: login from '" + req.Name + "' version " + req.VersionMajor + "." + req.VersionMinor + "." +
-                     req.VersionBuild + "." + req.VersionRevision + " branch '" + req.Branch + "' (" + req.SteamTicket.Length + "-byte Steam ticket, not checked)");
+            SignOn req = SignOn.Read(new WireReader(p.Body));
+            Log.Info("request: login from '" + req.Name + "' version " + req.VerMajor + "." + req.VerMinor + "." +
+                     req.VerBuild + "." + req.VerRevision + " branch '" + req.Branch + "' (" + req.SteamTicket.Length + "-byte Steam ticket, not checked)");
             if (!string.IsNullOrEmpty(req.Name)) _account.Name = req.Name;
             _account.Language = req.Language;
             if (_account.CreateTime == 0) _account.CreateTime = Now();
@@ -99,15 +99,15 @@ namespace EpidemicServer.Services
                          (UnlockCatalog.Ready ? "" : " (game data not loaded yet: unlocks not applied)") + "; the hub sees " + view.Characters.Count + " characters, " +
                          view.Uniques.Count + " weapons, " + view.Gadgets.Count + " gadgets, " + view.Stackables.Count + " stacks, story map XP " + view.StoryMapXp);
             }
-            c.Respond(p.RequestId, RequestResult.OK, RequestServerEncoders.LoginResponse(AuthResult.Success));
-            c.SendMessage(GameMessageIds.LoginDataMessage, RequestServerEncoders.LoginData(_account, _sessionTicket, _sessionId, Now()));
-            // LoginDataMessage.FirstLogin makes the hub re-equip every character's starter weapons
-            // (CribStart.OnLoginDataMessageRecieved -> Equipment.Initialize(true) -> AutoEquipStarter), so it is
+            c.Respond(p.RequestId, ResultCode.OK, RequestServerEncoders.SignOnReply(SignInResult.Success));
+            c.SendMessage(LinkMessageIds.SignOnData, RequestServerEncoders.LoginData(_account, _sessionTicket, _sessionId, Now()));
+            // SignOnData.FirstSignIn makes the hub re-equip every character's starter weapons
+            // (on login data message recieved -> Equipment.Initialize(true) -> auto equip starter), so it is
             // true only for an account's very first login. We never cleared it, and every login reset the
             // owner's loadouts to the paddle and pipe (2026-10-07).
-            if (_account.FirstLogin)
+            if (_account.FirstSignIn)
             {
-                lock (_account) _account.FirstLogin = false;
+                lock (_account) _account.FirstSignIn = false;
                 SaveAccount();
                 Log.Info("account: first login done; later logins keep the hub's saved loadouts");
             }
@@ -115,9 +115,9 @@ namespace EpidemicServer.Services
 
         private byte[] HandleAuth(Packet p)
         {
-            AuthRequest req = AuthRequest.Read(new WireReader(p.Body));
+            SignIn req = SignIn.Read(new WireReader(p.Body));
             Log.Info("request: re-auth with session ticket (" + req.Ticket.Length + " bytes)");
-            return RequestServerEncoders.AuthResponse(AuthResult.Success);
+            return RequestServerEncoders.SignInReply(SignInResult.Success);
         }
 
         /// <summary>Story map node unlock; node 2 is the free first character.</summary>
@@ -127,11 +127,11 @@ namespace EpidemicServer.Services
             int node = r.ReadVarInt32();
             byte[] choices = r.ReadRaw(r.ReadVarInt32());
             int revision = r.ReadVarInt32();
-            StoryMapUnlockResult result;
+            UnlockOutcome result;
             lock (_account)
             {
                 result = StoryMapRules.Unlock(_account, node, choices);
-                if (result == StoryMapUnlockResult.Success) SaveAccount();
+                if (result == UnlockOutcome.Success) SaveAccount();
             }
             Log.Info("request: unlock story map node " + node + " choices [" + string.Join(",", Array.ConvertAll(choices, b => b.ToString())) +
                      "] revision " + revision + ": " + result);
@@ -164,9 +164,9 @@ namespace EpidemicServer.Services
 
         private byte[] HandleSteamAuth(Packet p)
         {
-            AuthRequest req = AuthRequest.Read(new WireReader(p.Body));
+            SignIn req = SignIn.Read(new WireReader(p.Body));
             Log.Info("request: Steam re-auth (" + req.Ticket.Length + "-byte ticket, not checked)");
-            return RequestServerEncoders.SteamAuthResponse(AuthResult.Success, _sessionTicket, _account.UserId);
+            return RequestServerEncoders.PlatformSignInReply(SignInResult.Success, _sessionTicket, _account.UserId);
         }
     }
 
@@ -190,7 +190,7 @@ namespace EpidemicServer.Services
         {
             Log.Warn(_name + ": unimplemented " + p.Kind + " type " + p.Type + " body " + BitConverter.ToString(p.Body));
             if (p.Kind == PacketKind.Request)
-                c.Respond(p.RequestId, RequestResult.UnrecognizedError, null);
+                c.Respond(p.RequestId, ResultCode.Unrecognised, null);
         }
     }
 }

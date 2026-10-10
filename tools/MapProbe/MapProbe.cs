@@ -4,6 +4,7 @@
 using System;
 using System.Linq;
 using System.Reflection;
+using EpidemicServer.Resolve;
 using EpidemicServer.Match;
 
 public static class MapProbe
@@ -18,18 +19,18 @@ public static class MapProbe
         {
             GameRuntime game = GameRuntime.Load(install);
             game.MapIndex = map;
-            game.GameModeType = mode;
+            game.ModeKind = mode;
             game.Start(line => Console.WriteLine("   " + line));
-            Console.WriteLine("Game mode: " + game.GameMode.GetType().FullName + ", map " + game.MapName);
+            Console.WriteLine("Game mode: " + game.ActiveMode.GetType().FullName + ", map " + game.MapName);
             var lines = game.DescribeMapObjects();
             Console.WriteLine(lines.Count + " map objects by type:");
             foreach (var g in lines.Select(l => l.Split('|')[1].Trim()).GroupBy(n => n).OrderByDescending(g => g.Count()))
                 Console.WriteLine("  " + g.Count() + "  " + g.Key);
-            Console.WriteLine("Map objects (no Spawn_Static / Spawn_EventEntities):");
-            foreach (string l in lines.Where(l => !l.Contains("Spawn_Static") && !l.Contains("Spawn_EventEntities"))) Console.WriteLine("  " + l);
+            Console.WriteLine("Map objects (no MapKind.StaticSpawn / MapKind.EventSpawns):");
+            foreach (string l in lines.Where(l => !l.Contains(R.Name("MapKind.StaticSpawn")) && !l.Contains(R.Name("MapKind.EventSpawns")))) Console.WriteLine("  " + l);
             Console.WriteLine("Spawn points:");
             foreach (SpawnPoint s in game.SpawnPoints) Console.WriteLine("  " + s);
-            object gm = game.GameMode;
+            object gm = game.ActiveMode;
             Console.WriteLine(gm.GetType().Name + " fields:");
             foreach (var f in gm.GetType().GetFields(GameRuntime.All | BindingFlags.DeclaredOnly))
             {

@@ -1,15 +1,16 @@
-// Checks our story map blob byte-for-byte against the game's own
-// ConductorCrafting.AccountsData.Serialize, then decodes it with the game's
-// Deserialize. Loads the game's libraries from the owner's install at run time;
-// they are 32-bit only, so this builds as x86. Also runs InventoryCheck when
-// given the game's Managed folder. Build and run with tests\run_windows_checks.cmd.
+// Checks our story map blob byte-for-byte against the game's own account-data
+// serializer, then decodes it with the game's Deserialize. Loads the game's
+// libraries from the owner's install at run time (all game names through roles);
+// they are 32-bit only, so this builds as x86. Also runs InventoryCheck.
+// Build and run with tests/run_windows_checks.cmd.
 using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using EpidemicServer.Resolve;
 using EpidemicServer.Protocol;
-using StunMessage;
+using System.IO;
 
 public static class StoryMapCheck
 {
@@ -17,6 +18,18 @@ public static class StoryMapCheck
 
     public static int Main(string[] args)
     {
+        string managed = args[0];
+        AppDomain.CurrentDomain.AssemblyResolve += (s, e) =>
+        {
+            string p = Path.Combine(managed, new AssemblyName(e.Name).Name + ".dll");
+            return File.Exists(p) ? Assembly.LoadFrom(p) : null;
+        };
+        Assembly core = Assembly.LoadFrom(Path.Combine(managed, "StunCore.dll"));
+        _crafting = Assembly.LoadFrom(Path.Combine(managed, "ConductorCrafting.dll"));
+        Assembly game = Assembly.LoadFrom(Path.Combine(managed, "Assembly-CSharp.dll"));
+        R.Init(new[] { core, _crafting, game });
+        PacketType = R.Type("Type.Packet");
+        AccountsType = R.Type("Type.AccountBlob");
         Account starting = new Account();
         Inventory.EnsureStartingItems(starting);
         Case("starting rewards node only", starting);
@@ -28,7 +41,7 @@ public static class StoryMapCheck
         Case("character points chosen", Claimed(4));
         Case("several nodes and characters", Several());
         Case("empty lists", new Account());
-        if (args.Length > 0) _failures += InventoryCheck.Run(args[0]);
+        _failures += InventoryCheck.Run(managed);
         Console.WriteLine((_failures == 0 ? "no failures" : _failures + " checks failed") +
                           (InventoryCheck.Skipped > 0 ? ", " + InventoryCheck.Skipped + " skipped (not verified)" : ""));
         return _failures == 0 ? 0 : 1;
@@ -46,7 +59,7 @@ public static class StoryMapCheck
         Account a = Claimed(2);
         StoryMapNode n = new StoryMapNode();
         n.Id = 300;
-        n.UnlockedTimes = 3;
+        n.TimesUnlocked = 3;
         n.Choices.AddRange(new byte[] { 0, 1, 2 });
         a.Nodes.Add(n);
         OwnedCharacter c = new OwnedCharacter();
@@ -75,25 +88,36 @@ public static class StoryMapCheck
         }
     }
 
-    private static Assembly Crafting { get { return typeof(ConductorCrafting.AccountsData).Assembly; } }
-    private static Type NodeType { get { return Crafting.GetType("StoryMapUnlockData", true); } }
-    private static Type CharacterType { get { return Crafting.GetType("ConductorCrafting.CharacterData", true); } }
+    private static Assembly _crafting;
+    private static Type PacketType, AccountsType;
+    private static Type NodeType { get { return _crafting.GetType(R.Name("Type.UnlockRecord"), true); } }
+    private static Type CharacterType { get { return _crafting.GetType(R.Name("Type.HeroRecord"), true); } }
+    private const BindingFlags All = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance;
 
-    private static Message NewMessage()
+    /// <summary>A new game message buffer (its constructor takes a segment list and a segment factory).</summary>
+    private static object NewMessage()
     {
-        return new Message(new List<ArraySegment<byte>>(), () => new ArraySegment<byte>(new byte[4096]));
+        ConstructorInfo c = PacketType.GetConstructors(All).First(x => x.GetParameters().Length == 2);
+        Delegate factory = Delegate.CreateDelegate(c.GetParameters()[1].ParameterType, typeof(StoryMapCheck).GetMethod("NewSegment", All));
+        return c.Invoke(new object[] { new List<ArraySegment<byte>>(), factory });
     }
+
+    private static ArraySegment<byte> NewSegment() { return new ArraySegment<byte>(new byte[4096]); }
+
+    private static object Prop(object o, string name) { return o.GetType().GetProperty(name, All).GetValue(o, null); }
+    private static void SetPosition(object m, long v) { PropertyInfo p = m.GetType().GetProperty("Position", All); p.SetValue(m, Convert.ChangeType(v, p.PropertyType), null); }
+    private static long Num(object o, string name) { return Convert.ToInt64(Prop(o, name)); }
 
     private static MethodInfo AccountsMethod(string name)
     {
-        foreach (MethodInfo m in typeof(ConductorCrafting.AccountsData).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance))
-            if (m.Name == name && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == typeof(Message).MakeByRefType()) return m;
-        throw new Exception("AccountsData." + name + " not found");
+        foreach (MethodInfo m in AccountsType.GetMethods(All))
+            if (m.Name == name && m.GetParameters().Length == 3 && m.GetParameters()[0].ParameterType == PacketType.MakeByRefType()) return m;
+        throw new Exception("account data " + name + " not found");
     }
 
     private static object Invoke(MethodInfo m, object[] args)
     {
-        object target = m.IsStatic ? null : (object)default(ConductorCrafting.AccountsData);
+        object target = m.IsStatic ? null : (AccountsType.IsValueType ? Activator.CreateInstance(AccountsType) : null);
         return m.Invoke(target, args);
     }
 
@@ -103,45 +127,45 @@ public static class StoryMapCheck
         foreach (StoryMapNode n in a.Nodes)
         {
             object g = Activator.CreateInstance(NodeType);
-            NodeType.GetField("NodeID").SetValue(g, n.Id);
-            NodeType.GetField("UnlockedTimes").SetValue(g, n.UnlockedTimes);
-            NodeType.GetField("RewardUnlockChoices").SetValue(g, n.Choices.ToArray());
+            NodeType.GetField(R.Name("UnlockRecord.Node")).SetValue(g, n.Id);
+            NodeType.GetField(R.Name("UnlockRecord.Times")).SetValue(g, n.TimesUnlocked);
+            NodeType.GetField(R.Name("UnlockRecord.Choices")).SetValue(g, n.Choices.ToArray());
             nodes.Add(g);
         }
         IList characters = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(CharacterType));
         foreach (OwnedCharacter c in a.Characters)
         {
             object g = Activator.CreateInstance(CharacterType);
-            FieldInfo id = CharacterType.GetField("Character");
+            FieldInfo id = CharacterType.GetField(R.Name("HeroRecord.Id"));
             id.SetValue(g, Enum.ToObject(id.FieldType, (int)c.Id));
-            CharacterType.GetField("Owned").SetValue(g, c.Owned);
-            CharacterType.GetField("XP").SetValue(g, c.Xp);
+            CharacterType.GetField(R.Name("HeroRecord.Owned")).SetValue(g, c.Owned);
+            CharacterType.GetField(R.Name("HeroRecord.Xp")).SetValue(g, c.Xp);
             characters.Add(g);
         }
         object[] args = { NewMessage(), nodes, characters };
         Invoke(AccountsMethod("Serialize"), args);
-        Message m = (Message)args[0];
-        m.Position = 0;
-        return m.ToBytes();
+        object m = args[0];
+        SetPosition(m, 0);
+        return (byte[])m.GetType().GetMethod(R.Name("Net.Bytes"), All, null, Type.EmptyTypes, null).Invoke(m, null);
     }
 
     private static void GameDeserialize(byte[] ours, Account a)
     {
-        Message m = NewMessage();
-        m.Write(ours, 0, ours.Length);
-        m.Position = 0;
+        object m = NewMessage();
+        m.GetType().GetMethod("Write", All, null, new[] { typeof(byte[]), typeof(int), typeof(int) }, null).Invoke(m, new object[] { ours, 0, ours.Length });
+        SetPosition(m, 0);
         object[] args = { m, null, null };
         if (!(bool)Invoke(AccountsMethod("Deserialize"), args)) throw new Exception("game's Deserialize rejected our blob");
-        m = (Message)args[0];
-        if (m.Position != m.Length) throw new Exception("game's Deserialize left " + (m.Length - m.Position) + " bytes unread");
+        m = args[0];
+        if (Num(m, "Position") != Num(m, "Length")) throw new Exception("game's Deserialize left " + (Num(m, "Length") - Num(m, "Position")) + " bytes unread");
         List<object> nodes = ((IEnumerable)args[1]).Cast<object>().ToList();
         List<object> characters = ((IEnumerable)args[2]).Cast<object>().ToList();
         if (nodes.Count != a.Nodes.Count) throw new Exception("game decoded " + nodes.Count + " nodes, expected " + a.Nodes.Count);
         if (characters.Count != a.Characters.Count) throw new Exception("game decoded " + characters.Count + " characters, expected " + a.Characters.Count);
         for (int i = 0; i < characters.Count; i++)
         {
-            int id = Convert.ToInt32(CharacterType.GetField("Character").GetValue(characters[i]));
-            bool owned = (bool)CharacterType.GetField("Owned").GetValue(characters[i]);
+            int id = Convert.ToInt32(CharacterType.GetField(R.Name("HeroRecord.Id")).GetValue(characters[i]));
+            bool owned = (bool)CharacterType.GetField(R.Name("HeroRecord.Owned")).GetValue(characters[i]);
             if (id != a.Characters[i].Id || owned != a.Characters[i].Owned)
                 throw new Exception("game decoded character " + id + "/" + owned + ", expected " + a.Characters[i].Id + "/" + a.Characters[i].Owned);
         }

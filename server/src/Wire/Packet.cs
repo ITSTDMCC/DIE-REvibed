@@ -11,14 +11,14 @@ namespace EpidemicServer.Wire
     }
 
     /// <summary>Outcome code carried by every response, ahead of its body.</summary>
-    public enum RequestResult
+    public enum ResultCode
     {
         OK = 0,
         Disconnected = 1,
         Timeout = 2,
-        DeserializeFail = 3,
-        UnrecognizedError = 4,
-        PermissionDenied = 5
+        BadPayload = 3,
+        Unrecognised = 4,
+        NotAllowed = 5
     }
 
     /// <summary>
@@ -56,13 +56,13 @@ namespace EpidemicServer.Wire
             return Frame(w.ToArray());
         }
 
-        public static byte[] EncodeResponse(byte[] requestId, RequestResult result, byte[] body)
+        public static byte[] EncodeResponse(byte[] requestId, ResultCode result, byte[] body)
         {
             WireWriter w = new WireWriter();
             w.WriteByte((byte)PacketKind.Response);
             w.WriteRaw(requestId);
             w.WriteVarInt32((int)result);
-            if (result == RequestResult.OK && body != null) w.WriteRaw(body);
+            if (result == ResultCode.OK && body != null) w.WriteRaw(body);
             return Frame(w.ToArray());
         }
 

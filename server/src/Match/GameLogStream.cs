@@ -6,7 +6,7 @@ namespace EpidemicServer.Match
 {
     /// <summary>
     /// A write-only stream handed to the game's own logger
-    /// (StunCore.StunLog.AddOutputStream), so the game's log lines, including
+    /// (Log.AddStream), so the game's log lines, including
     /// its error messages, reach our log.
     /// </summary>
     public sealed class GameLogStream : Stream

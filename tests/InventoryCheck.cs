@@ -1,12 +1,13 @@
 // Checks our Unique (weapon) encoding byte-for-byte against the game's own
-// GameProtocol.MessageSerialization.Serialize(ref Unique, ref Message), loaded
-// by reflection from Assembly-CSharp.dll in the owner's install (as tests/ReferenceTests.cs uses).
+// protocol.Serializer.Serialize(ref Unique, ref Message), loaded
+// by reflection from Assembly-CSharp.dll in the owner's install.
 // Run from tests\run_windows_checks.cmd.
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using EpidemicServer.Resolve;
 using EpidemicServer.Protocol;
 using EpidemicServer.Wire;
 
@@ -34,7 +35,7 @@ public static class InventoryCheck
         OwnedUnique worn = new OwnedUnique();
         worn.Guid = Guid.NewGuid().ToByteArray();
         worn.SchematicId = 60000;
-        worn.IsInInventory = false;
+        worn.InBag = false;
         worn.Durability = 0;
         worn.Ep = 300;
         failures += Case(hub, "broken, stored weapon (unique)", worn, ulong.MaxValue);
@@ -71,22 +72,22 @@ public static class InventoryCheck
 
     private static byte[] GameSerialize(Assembly hub, OwnedUnique u, ulong userId)
     {
-        Type serialization = hub.GetType("GameProtocol.MessageSerialization", true);
+        Type serialization = hub.GetType(R.Name("Type.Serializer"), true);
         MethodInfo serialize = serialization.GetMethods(BindingFlags.Public | BindingFlags.Static).First(m =>
             m.Name == "Serialize" && m.GetParameters().Length == 2 &&
-            m.GetParameters()[0].ParameterType.GetElementType().FullName == "ConductorCrafting.Unique");
+            m.GetParameters()[0].ParameterType.GetElementType().FullName == R.Name("Type.ItemInstance"));
         // Take both types from the signature so they are exactly the ones the serializer binds to.
         Type uniqueType = serialize.GetParameters()[0].ParameterType.GetElementType();
         Type messageType = serialize.GetParameters()[1].ParameterType.GetElementType();
 
         object unique = Activator.CreateInstance(uniqueType);
         uniqueType.GetField("Guid").SetValue(unique, u.Guid);
-        uniqueType.GetField("SchematicID").SetValue(unique, u.SchematicId);
-        uniqueType.GetField("UserID").SetValue(unique, userId);
-        uniqueType.GetField("IsInInventory").SetValue(unique, u.IsInInventory);
-        uniqueType.GetField("Durability").SetValue(unique, u.Durability);
-        uniqueType.GetField("EP").SetValue(unique, u.Ep);
-        uniqueType.GetField("Slots").SetValue(unique, new byte[0]);
+        uniqueType.GetField(R.Name("Craft.Blueprint")).SetValue(unique, u.SchematicId);
+        uniqueType.GetField(R.Name("Item.Owner")).SetValue(unique, userId);
+        uniqueType.GetField(R.Name("Item.Held")).SetValue(unique, u.InBag);
+        uniqueType.GetField(R.Name("Item.Wear")).SetValue(unique, u.Durability);
+        uniqueType.GetField(R.Name("Item.Points")).SetValue(unique, u.Ep);
+        uniqueType.GetField(R.Name("Item.Sockets")).SetValue(unique, new byte[0]);
 
         Func<ArraySegment<byte>> chunks = () => new ArraySegment<byte>(new byte[4096]);
         object message = Activator.CreateInstance(messageType, new List<ArraySegment<byte>>(), chunks);
@@ -96,6 +97,6 @@ public static class InventoryCheck
         PropertyInfo position = messageType.GetProperty("Position");
         if (position != null) position.SetValue(message, Convert.ChangeType(0, position.PropertyType), null);
         else { FieldInfo f = messageType.GetField("Position"); f.SetValue(message, Convert.ChangeType(0, f.FieldType)); }
-        return (byte[])messageType.GetMethod("ToBytes", Type.EmptyTypes).Invoke(message, null);
+        return (byte[])messageType.GetMethod(R.Name("Net.Bytes"), Type.EmptyTypes).Invoke(message, null);
     }
 }

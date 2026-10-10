@@ -25,11 +25,11 @@ All addresses come from `ip.cfg` (branch `public`); ports use defaults unless
 
 ## Solo match flow (from the hub's code)
 
-1. Hub asks the request server for a matchmaking ticket (`GetMatchmakingTicketRequest`).
-2. Hub sends `SoloServerCreateRequest` (ticket, queue type, map) to the matchmaking server.
-3. Matchmaking answers `SoloServerCreated` with a match server IP and port.
+1. Hub asks the request server for a matchmaking ticket (`MatchTicket`).
+2. Hub sends `SoloServer` (ticket, queue type, map) to the matchmaking server.
+3. Matchmaking answers `solo server created` with a match server IP and port.
 4. Hub starts the match client, which connects to that match server over Lidgren UDP and
-   authenticates through the request server (`GameplayAuthRequest`).
+   authenticates through the request server (`MatchSignIn`).
 
 ## The match server
 
@@ -43,17 +43,22 @@ time, under 32-bit Mono. It supplies the missing server side itself: the server 
 networking, match flow, spawning, objectives, scoring, bots and AI. No game code is
 included in this repository.
 
-## Finding the game's code at run time (v0.2)
+## Finding the game's code at run time (v0.2, v0.3)
 
-Most of the game's classes, fields and methods have scrambled names. The server doesn't
-contain those names. It uses **roles**, our own descriptive names such as
-`Barricade.SetHealth` or `ScavengerState.RoomOwner`, and looks each one up when it starts:
+The server contains none of the game's class, field, method or enum value names. It uses
+**roles**, our own descriptive names such as `Barricade.SetHealth`, `World.SpawnObject` or
+`Team.Two`, and looks each one up when it starts. Most of the game's code has scrambled
+names; those roles are found by structure (v0.2). The rest has readable names; those
+roles are found by a hash of the name (v0.3):
 
 - `server/src/Resolve/RoleTable.cs` maps each role to a **fingerprint**: a hash of the
   shape of the class (its kind, base class, and the counts and types of its fields and
   methods, with every scrambled name replaced by a placeholder), plus its position among
   classes of the same shape. A member's fingerprint is its class's fingerprint plus a
   hash of its own signature and its position among members of the same signature.
+- A role for a readable name stores `N|` and a salted one-way hash of the name. At
+  start-up the server hashes every readable name in the libraries (type, namespace,
+  member and enum value names) and keeps the ones the table asks for.
 - At start-up `R.Init` fingerprints every class in the three game libraries on the
   player's PC, and `R.Check` confirms every role resolves. A missing role stops the
   server with a clear message. The supported build is 0.8.5.38860, the last one.
@@ -66,5 +71,7 @@ contain those names. It uses **roles**, our own descriptive names such as
 `tools/RoleGen` rebuilds `RoleTable.cs`. It reads a developer-only role map
 (`local/roles.map`, git-ignored, never committed) that pairs each role with the current
 name, fingerprints the installed game, checks that every fingerprint leads back to
-exactly that class or member, and writes the table. `tools\run_rolegen.cmd
+exactly that class or member, and writes the table. A few readable names exist only in
+the hub's own library; RoleGen lists them in `RoleTable.HubOnly`, and only the hub side
+(the rewards writer) resolves them. `tools\run_rolegen.cmd
 local\roles.map check` compares the committed table with the installed game.

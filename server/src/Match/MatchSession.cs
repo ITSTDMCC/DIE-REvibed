@@ -9,7 +9,7 @@ namespace EpidemicServer.Match
     /// One connected match client, driven on the game thread (owner's design,
     /// 2026-10-06). Client frames go through the game's own reliable layers
     /// (roles ReliableOrdered and ReliableUnordered), which record what to ack.
-    /// Until the client reports LoadingComplete we send empty frames, as before;
+    /// Until the client reports Loaded we send empty frames, as before;
     /// after it, every tick runs the game logic and sends acks, controllers and,
     /// when due, synchronizables.
     /// </summary>
@@ -18,16 +18,23 @@ namespace EpidemicServer.Match
         public const float TickSeconds = 1f / 30f;
         /// <summary>Synchronizables go out every this many ticks.</summary>
         private const int SyncEveryTicks = 3;
-        private const byte GameMessage = 0;
-        private const byte LoadingComplete = 20;
-        private const byte TutorialCameraComplete = 2;
-        private const byte SkipTutorialIntro = 14;
+        private const byte MatchMessage = 0;
+        private const byte Loaded = 20;
+        private const byte IntroCameraDone = 2;
+        private const byte IntroSkipped = 14;
         /// <summary>The "Move" guide follows the wake-up stage after this long.</summary>
         private const float WakeUpSeconds = 4f;
-        private static readonly Dictionary<byte, string> MessageNames = new Dictionary<byte, string>
+        private static Dictionary<byte, string> _messageNames;
+        private static Dictionary<byte, string> MessageNames
         {
-            { 2, "TutorialCameraComplete" }, { 14, "SkipTutorialIntro" }, { 20, "LoadingComplete" }, { 28, "ClientStats" },
-        };
+            get
+            {
+                return _messageNames ?? (_messageNames = new Dictionary<byte, string>
+                {
+                    { 2, R.Name("Msg.CameraDone") }, { 14, R.Name("Msg.IntroSkipped") }, { 20, R.Name("Msg.Loaded") }, { 28, R.Name("Msg.Stats") },
+                });
+            }
+        }
 
         private readonly GameRuntime _game;
         private readonly object _player, _client;
@@ -60,8 +67,8 @@ namespace EpidemicServer.Match
             _sendUnordered = _unordered.GetType().GetMethod("Send", GameRuntime.All);
             _onMessage = Delegate.CreateDelegate(_readOrdered.GetParameters()[1].ParameterType, this,
                 typeof(MatchSession).GetMethod("OnMessage", BindingFlags.NonPublic | BindingFlags.Instance));
-            _update = game.GameManagerType.GetMethod("Update", GameRuntime.All, null, new[] { typeof(float), typeof(float), typeof(int) }, null);
-            _controllerIn = _client.GetType().GetMethod("ControllerClientToServerDeserialize", GameRuntime.All);
+            _update = game.WorldType.GetMethod("Update", GameRuntime.All, null, new[] { typeof(float), typeof(float), typeof(int) }, null);
+            _controllerIn = _client.GetType().GetMethod(R.Name("Net.ReadInput"), GameRuntime.All);
             // Reliable game messages from the server hooks (e.g. destroy) go on the in-order layer, channel 0.
             _queueOrdered = _ordered.GetType().GetMethod(R.Name("ReliableOrdered.Queue"), GameRuntime.All);
             _ackIgnored = Delegate.CreateDelegate(_queueOrdered.GetParameters()[3].ParameterType,
@@ -87,7 +94,7 @@ namespace EpidemicServer.Match
 
         private float Time { get { return (float)(DateTime.UtcNow - _start).TotalSeconds; } }
 
-        /// <summary>A GameplayData frame from the client.</summary>
+        /// <summary>A MatchFrame frame from the client.</summary>
         public void OnClientFrame(byte[] frame)
         {
             FramesIn++;
@@ -106,23 +113,23 @@ namespace EpidemicServer.Match
             byte type = b.ReadByte();
             string name;
             if (!MessageNames.TryGetValue(type, out name)) name = "unknown";
-            string label = (kind == GameMessage ? "GameMessage" : kind == 1 ? "DebugMessage" : "kind " + kind) + " " + type + " (" + name + ")";
-            if (kind == GameMessage && type == LoadingComplete && !_loaded)
+            string label = (kind == MatchMessage ? R.Name("Msg.Game") : kind == 1 ? R.Name("Msg.Debug") : "kind " + kind) + " " + type + " (" + name + ")";
+            if (kind == MatchMessage && type == Loaded && !_loaded)
             {
                 _loaded = true;
                 _syncDue = true;
                 Log.Info("match: client says " + label + "; spawning player 0 on the next frame");
-                Log.Info("match: player 0 Health " + ServerHooks.GetStat(_player, "Health") + " / MaxHealth " + ServerHooks.GetStat(_player, "MaxHealth"));
+                Log.Info("match: player 0 Health " + ServerHooks.GetStat(_player, R.Name("Stat.Health")) + " / Stat.HealthMax " + ServerHooks.GetStat(_player, R.Name("Stat.HealthMax")));
             }
-            else if (kind == GameMessage && (type == SkipTutorialIntro || type == TutorialCameraComplete) && _game.TutorialStage == 0)
+            else if (kind == MatchMessage && (type == IntroSkipped || type == IntroCameraDone) && _game.TutorialStage == 0)
             {
-                // End the intro: stage 1 (wake up), sent with the next GameMode sync.
+                // End the intro: stage 1 (wake up), sent with the next ActiveMode sync.
                 _game.TutorialStage = 1;
                 _wakeUpAt = Time;
                 _syncDue = true;
                 Log.Info("match: client message " + label + "; tutorial stage 0 -> 1 (wake up)");
             }
-            else if (kind == GameMessage && ServerHooks.OnGameMessage != null && ServerHooks.OnGameMessage(type, b)) { }
+            else if (kind == MatchMessage && ServerHooks.OnGameMessage != null && ServerHooks.OnGameMessage(type, b)) { }
             else Log.Info("match: client message " + label);
         }
 
@@ -146,7 +153,7 @@ namespace EpidemicServer.Match
                 Log.Info("match: tutorial stage 1 -> 2 (Move guide)");
             }
             _frame++;
-            _update.Invoke(_game.GameManager, new object[] { TickSeconds, t, _frame });
+            _update.Invoke(_game.World, new object[] { TickSeconds, t, _frame });
 
             GameBuffer b = GameBuffer.Create();
             _sendOrdered.Invoke(_ordered, new[] { (object)t, b.Buffer });
@@ -156,7 +163,7 @@ namespace EpidemicServer.Match
             // Every few ticks send every active synchronizable. Objects that become
             // inactive are not sent again: the client drops an object synced as
             // inactive without letting it die. Despawns go out as destroy messages
-            // (ServerHooks.SendGameObjectDestroyed).
+            // (ServerHooks.OnDestroyed).
             List<object> syncs = new List<object>();
             if (_syncDue || ServerHooks.SyncNow || ++_ticksSinceSync >= SyncEveryTicks)
             {

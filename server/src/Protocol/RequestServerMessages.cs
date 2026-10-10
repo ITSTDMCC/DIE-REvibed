@@ -4,22 +4,22 @@ using EpidemicServer.Wire;
 
 namespace EpidemicServer.Protocol
 {
-    public sealed class LoginRequest
+    public sealed class SignOn
     {
         public byte[] SteamTicket;
-        public int VersionMajor, VersionMinor, VersionBuild, VersionRevision;
+        public int VerMajor, VerMinor, VerBuild, VerRevision;
         public string Branch;
         public int Language;
         public string Name;
 
-        public static LoginRequest Read(WireReader r)
+        public static SignOn Read(WireReader r)
         {
-            LoginRequest m = new LoginRequest();
+            SignOn m = new SignOn();
             m.SteamTicket = r.ReadBytes();
-            m.VersionMajor = r.ReadVarInt32();
-            m.VersionMinor = r.ReadVarInt32();
-            m.VersionBuild = r.ReadVarInt32();
-            m.VersionRevision = r.ReadVarInt32();
+            m.VerMajor = r.ReadVarInt32();
+            m.VerMinor = r.ReadVarInt32();
+            m.VerBuild = r.ReadVarInt32();
+            m.VerRevision = r.ReadVarInt32();
             m.Branch = r.ReadString();
             m.Language = r.ReadVarInt32();
             m.Name = r.ReadString();
@@ -27,24 +27,24 @@ namespace EpidemicServer.Protocol
         }
     }
 
-    /// <summary>Body shared by AuthRequest (session ticket) and SteamAuthRequest (Steam ticket).</summary>
-    public sealed class AuthRequest
+    /// <summary>Body shared by SignIn (session ticket) and PlatformSignIn (Steam ticket).</summary>
+    public sealed class SignIn
     {
         public byte[] Ticket;
-        public int VersionMajor, VersionMinor, VersionBuild, VersionRevision;
+        public int VerMajor, VerMinor, VerBuild, VerRevision;
         public string Branch;
-        public int DisabledFeaturesRevision;
+        public int OffFeaturesRevision;
 
-        public static AuthRequest Read(WireReader r)
+        public static SignIn Read(WireReader r)
         {
-            AuthRequest m = new AuthRequest();
+            SignIn m = new SignIn();
             m.Ticket = r.ReadBytes();
-            m.VersionMajor = r.ReadVarInt32();
-            m.VersionMinor = r.ReadVarInt32();
-            m.VersionBuild = r.ReadVarInt32();
-            m.VersionRevision = r.ReadVarInt32();
+            m.VerMajor = r.ReadVarInt32();
+            m.VerMinor = r.ReadVarInt32();
+            m.VerBuild = r.ReadVarInt32();
+            m.VerRevision = r.ReadVarInt32();
             m.Branch = r.ReadString();
-            m.DisabledFeaturesRevision = r.ReadVarInt32();
+            m.OffFeaturesRevision = r.ReadVarInt32();
             return m;
         }
     }
@@ -52,28 +52,28 @@ namespace EpidemicServer.Protocol
     /// <summary>Encoders for the request server's replies, in the field order the client reads them.</summary>
     public static class RequestServerEncoders
     {
-        public const int DisabledFeaturesRevision = 2;
+        public const int OffFeaturesRevision = 2;
 
         /// <summary>
         /// The hub's welcome popup (shown when the starter quest counts as done) loads its pages from
-        /// LoginDataMessage.WelcomeDataURL with Unity's WWW (WelcomeDataManager.LoadData) and spins
+        /// welcome data URL with Unity's WWW (load data) and spins
         /// until that load finishes. We point it at our own empty welcome file (see WelcomeFile).
         /// </summary>
         public static string WelcomeDataUrl = "";
 
         /// <summary>
-        /// Features the hub treats as disabled (ConductorCrafting.Features). With Crossroads (45) off,
-        /// the hub's play window lists Practice (GUI_PlayLobbyInfo.SetIsOwner); with StarterQuest (36)
-        /// locked, StarterQuestManager.IsUnlocked is true, which unlocks the ScoutMission lobby
-        /// (CharacterData.HasUnlockedGameMode(14)). Owner's design, 2026-10-06.
+        /// Features the hub treats as disabled (crafting.Features). With Crossroads (45) off,
+        /// the hub's play window lists Practice (set is owner); with starter quest (36)
+        /// locked, is unlocked is true, which unlocks the PracticeRules lobby
+        /// (has unlocked game mode(14)). Owner's design, 2026-10-06.
         /// </summary>
-        public static readonly int[] DisabledFeatures = { 45, 36 };
+        public static readonly int[] OffFeatures = { 45, 36 };
 
         /// <summary>
         /// Heroic Horde stays locked below account level 20 (owner, 2026-10-07): the hub let a level-4
-        /// account into ResistanceHard, so the server also sends HoardHeroicMode (44) as disabled, which the
-        /// hub's FeatureLocker.IsGameModeLocked maps to ResistanceHard. HeroicUnlockXp is the story map XP for
-        /// level 20 (AccountLevelHelpers.GetRequiredExperience(20)), set by the match host once the game's
+        /// account into resistance hard, so the server also sends hoard heroic mode (44) as disabled, which the
+        /// hub's is game mode locked maps to resistance hard. HeroicUnlockXp is the story map XP for
+        /// level 20 (Levels.XpFor(20)), set by the match host once the game's
         /// libraries are loaded; until then Heroic stays locked.
         /// </summary>
         public const int HeroicHordeFeature = 44, HeroicUnlockLevel = 20;
@@ -83,41 +83,41 @@ namespace EpidemicServer.Protocol
         /// <summary>A different list gets a different revision, so the hub doesn't keep a cached one.</summary>
         public static int CurrentDisabledFeaturesRevision()
         {
-            return DisabledFeaturesRevision + (CurrentDisabledFeatures().Length > DisabledFeatures.Length ? 1 : 0);
+            return OffFeaturesRevision + (CurrentDisabledFeatures().Length > OffFeatures.Length ? 1 : 0);
         }
 
         public static int[] CurrentDisabledFeatures()
         {
             Account a = FeatureAccount;
             bool locked = a == null || (!a.UnlockAll && AccountView.EffectiveXp(a) < HeroicUnlockXp);
-            return locked ? DisabledFeatures.Concat(new[] { HeroicHordeFeature }).ToArray() : DisabledFeatures;
+            return locked ? OffFeatures.Concat(new[] { HeroicHordeFeature }).ToArray() : OffFeatures;
         }
 
         public static void WriteCurrency(WireWriter w, Account a)
         {
             w.WriteVarInt32(a.Gold);
             w.WriteVarInt32(a.Silver);
-            w.WriteVarInt32(a.CharacterPoints);
-            w.WriteVarInt32(a.ResearchPoints);
+            w.WriteVarInt32(a.HeroPoints);
+            w.WriteVarInt32(a.LabPoints);
         }
 
         public static void WriteAccountData(WireWriter w, Account a)
         {
             w.WriteVarUInt64(a.UserId);
             w.WriteVarUInt32(a.StoryMapXp);
-            w.WriteBytes(a.StoryMapData);
-            w.WriteByte(a.StoryMapVersion);
-            w.WriteVarInt64(a.RegularBoost);
-            w.WriteVarInt64(a.PremiumBoost);
+            w.WriteBytes(a.UnlockTreeData);
+            w.WriteByte(a.UnlockTreeVersion);
+            w.WriteVarInt64(a.BoostNormal);
+            w.WriteVarInt64(a.BoostPaid);
             w.WriteVarUInt32(a.UnboundXp);
             w.WriteVarInt64(a.CreateTime);
-            w.WriteByte(a.VanityIcon);
+            w.WriteByte(a.ProfileIcon);
             w.WriteVarUInt32(a.UnlockedDlc);
-            w.WriteVarInt64(a.LastPremiumGain);
-            w.WriteVarInt64(a.LastScavengerWinBonusTime);
-            w.WriteVarInt64(a.LastHordeWinBonusTime);
-            w.WriteBytes(a.CounterData);
-            w.WriteUInt16(a.CrossroadProgress);
+            w.WriteVarInt64(a.LastPaidGain);
+            w.WriteVarInt64(a.LastScavengerBonus);
+            w.WriteVarInt64(a.LastHordeBonus);
+            w.WriteBytes(a.Counters);
+            w.WriteUInt16(a.CrossroadsState);
             w.WriteVarInt32(a.Language);
         }
 
@@ -133,7 +133,7 @@ namespace EpidemicServer.Protocol
             w.WriteVarUInt32(0); // maps
         }
 
-        public static byte[] LoginResponse(AuthResult result)
+        public static byte[] SignOnReply(SignInResult result)
         {
             WireWriter w = new WireWriter();
             w.WriteVarInt32((int)result);
@@ -146,7 +146,7 @@ namespace EpidemicServer.Protocol
         {
             Account a = AccountView.For(real);
             WireWriter w = new WireWriter();
-            w.WriteVarInt32((int)AuthResult.Success);
+            w.WriteVarInt32((int)SignInResult.Success);
             w.WriteBytes(sessionTicket);
             w.WriteVarUInt64(a.UserId);
             WriteCurrency(w, a);
@@ -156,7 +156,7 @@ namespace EpidemicServer.Protocol
             w.WriteByte(0);       // upsell step
             w.WriteVarInt64(0);   // upsell time
             WriteAccountData(w, a);
-            w.WriteBool(a.FirstLogin);
+            w.WriteBool(a.FirstSignIn);
             Inventory.WriteStackables(w, a);
             Inventory.WriteUniques(w, a);
             Inventory.WriteGadgets(w, a);
@@ -169,12 +169,12 @@ namespace EpidemicServer.Protocol
             w.WriteBytes(sessionId);
             w.WriteVarInt32(0);   // ban reason
             w.WriteUInt16(0);     // banned days
-            w.WriteString(WelcomeDataUrl);    // welcome page data URL (WelcomeDataManager.URL)
+            w.WriteString(WelcomeDataUrl);    // welcome page data URL (welcome-data-manager.URL)
             w.WriteVarInt64(serverTime);
             return w.ToArray();
         }
 
-        public static byte[] AuthResponse(AuthResult result)
+        public static byte[] SignInReply(SignInResult result)
         {
             WireWriter w = new WireWriter();
             w.WriteVarInt32((int)result);
@@ -184,7 +184,7 @@ namespace EpidemicServer.Protocol
             return w.ToArray();
         }
 
-        public static byte[] SteamAuthResponse(AuthResult result, byte[] sessionTicket, ulong userId)
+        public static byte[] PlatformSignInReply(SignInResult result, byte[] sessionTicket, ulong userId)
         {
             WireWriter w = new WireWriter();
             w.WriteVarInt32((int)result);
@@ -208,7 +208,7 @@ namespace EpidemicServer.Protocol
             Account a = AccountView.For(real);
             WireWriter w = new WireWriter();
             WriteAccountData(w, a);
-            w.WriteBool(a.FirstLogin);
+            w.WriteBool(a.FirstSignIn);
             w.WriteVarUInt32(0);  // uniques received
             return w.ToArray();
         }
@@ -250,9 +250,9 @@ namespace EpidemicServer.Protocol
         public static byte[] ShopResponse(long serverTime)
         {
             EpidemicServer.Wire.WireWriter w = new EpidemicServer.Wire.WireWriter();
-            // "Outdated", with an empty shop document: the hub then has an active ShopDocument. Answered
-            // "up to date" with none, its LoadShopItems threw on the null document and never called back,
-            // and that callback is what starts the welcome popup's loader (CribMain.LateUpdate).
+            // "Outdated", with an empty shop document: the hub then has an active shop document. Answered
+            // "up to date" with none, its load shop items threw on the null document and never called back,
+            // and that callback is what starts the welcome popup's loader (late update).
             w.WriteBool(true);    // client shop outdated
             w.WriteVarInt32(1);   // revision
             for (int i = 0; i < 7; i++) w.WriteVarUInt32(0); // events, items, user groups, banners, gold prices, price changes, currency events
@@ -322,7 +322,7 @@ namespace EpidemicServer.Protocol
             return w.ToArray();
         }
 
-        public static byte[] BalanceChangeResponse()
+        public static byte[] BalanceChangeReply()
         {
             EpidemicServer.Wire.WireWriter w = new EpidemicServer.Wire.WireWriter();
             w.WriteVarUInt32(0);

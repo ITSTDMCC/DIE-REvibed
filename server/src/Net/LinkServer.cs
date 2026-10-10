@@ -39,7 +39,7 @@ namespace EpidemicServer.Net
 
         public void SendMessage(ushort type, byte[] body) { Send(Packet.EncodeMessage(type, body)); }
 
-        public void Respond(byte[] requestId, RequestResult result, byte[] body)
+        public void Respond(byte[] requestId, ResultCode result, byte[] body)
         {
             Send(Packet.EncodeResponse(requestId, result, body));
         }
@@ -120,7 +120,7 @@ namespace EpidemicServer.Net
                         {
                             Log.Error(_handler.Name + ": failed handling packet type " + p.Type + ": " + e);
                             if (p.Kind == PacketKind.Request)
-                                c.Respond(p.RequestId, RequestResult.UnrecognizedError, null);
+                                c.Respond(p.RequestId, ResultCode.Unrecognised, null);
                         }
                     }
                 }

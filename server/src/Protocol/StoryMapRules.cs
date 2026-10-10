@@ -122,6 +122,14 @@ namespace EpidemicServer.Protocol
             return changed;
         }
 
+        /// <summary>The hero id chosen at the first hero pick, or 0 if none was picked (or points were taken).</summary>
+        public static byte PickedHero(Account a)
+        {
+            StoryMapNode pick = a.Nodes.Find(n => n.Id == FirstCharacterNode);
+            if (pick == null || pick.Choices.Count != 1 || pick.Choices[0] >= FirstCharacterChoices.Length) return 0;
+            return FirstCharacterChoices[pick.Choices[0]];
+        }
+
         private static void AddCharacter(Account a, byte id)
         {
             foreach (OwnedCharacter c in a.Characters)

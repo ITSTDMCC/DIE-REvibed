@@ -134,6 +134,14 @@ namespace EpidemicServer.Match
             // The hero the hub queued with, the tutorial included (issue #1: the tutorial always used the default
             // hero). The tutorial still starts with fists at infection level 1, as the original.
             if (l != null && l.Character != 0 && Enum.IsDefined(characterEnum, (int)l.Character)) character = Enum.GetName(characterEnum, (int)l.Character);
+            else
+            {
+                // No loadout: the tutorial started from the hub's main menu sends none (2026-10-10 playtest: it fell
+                // back to the default hero). Use the hero the account picked at its first hero pick.
+                byte picked;
+                lock (_account) picked = StoryMapRules.PickedHero(_account);
+                if (picked != 0 && Enum.IsDefined(characterEnum, (int)picked)) character = Enum.GetName(characterEnum, (int)picked);
+            }
             Game.Character = character;
             Game.MatchLevel = 1;
             if (tutorial) return;

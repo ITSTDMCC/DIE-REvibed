@@ -645,7 +645,17 @@ namespace EpidemicServer.Match
         /// go straight. The NPC's own goal-position mode (Npc.UseGoalPosition, goal position) does the walking.
         /// Recomputed every NavRecompute s.
         /// </summary>
-        public static void Steer(object npc, object target)
+        public static void Steer(object npc, object target) { Steer(npc, target, null); }
+
+        /// <summary>
+        /// Walks an NPC to a place rather than at an entity: no goal target is set, only goal positions. The tutorial
+        /// companion following the player with the player as her goal target slid along without her walk animation
+        /// (owner, 2026-10-10); toward a zombie it played. Inference: the client animates a goal-target walk only
+        /// toward an enemy.
+        /// </summary>
+        public static void SteerToPoint(object npc, float[] goal) { Steer(npc, null, goal); }
+
+        private static void Steer(object npc, object target, float[] point)
         {
             Type t = npc.GetType();
             t.GetProperty(R.Name("Npc.Target"), All).SetValue(npc, target, null);
@@ -663,11 +673,12 @@ namespace EpidemicServer.Match
                 NavLastPos[npc] = here;
                 bool shortLook = NavShortUntil.TryGetValue(npc, out shortUntil) && _time < shortUntil;
                 float[] wp = null;
-                try { wp = Waypoint(here, Position(target), shortLook ? 0f : 100f); }
+                try { wp = Waypoint(here, target != null ? Position(target) : point, shortLook ? 0f : 100f); }
                 catch (Exception e) { if (!_pathLogged) { _pathLogged = true; Log("path: failed: " + GameRuntime.Unwrap(e).Message); } }
                 NavWaypoint[npc] = wp;
             }
             float[] w = NavWaypoint[npc];
+            if (w == null && target == null) w = point;
             if (w == null)
             {
                 SetField(npc, R.Name("Npc.UseGoalPosition"), false);

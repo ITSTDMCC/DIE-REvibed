@@ -453,6 +453,8 @@ namespace EpidemicServer.Match
         }
 
         /// <summary>Companion follows the player at 30-60 units and attacks zombies within 80 units of her.</summary>
+        private bool _companionFollowing;
+
         private void CompanionAi(float time)
         {
             if (Destroyed(Companion)) return;
@@ -478,8 +480,10 @@ namespace EpidemicServer.Match
             }
             if (target != null) { Strike(target, time, null); return; }
             float da = Distance(b, a[0], a[1]);
-            if (da > CompanionFar) ServerHooks.Steer(Companion, _player);
-            else if (da < CompanionNear) ServerHooks.StopSteering(Companion);
+            // Follow once she falls CompanionFar behind, until she is back within CompanionNear.
+            if (da > CompanionFar) _companionFollowing = true;
+            else if (da < CompanionNear && _companionFollowing) { _companionFollowing = false; ServerHooks.StopSteering(Companion); }
+            if (_companionFollowing) ServerHooks.SteerToPoint(Companion, a);
             // Face where she walks, as when she goes for a zombie: following with a stale aim, the client slid her
             // along without the walk animation (owner, 2026-10-10 playtest).
             if (da >= CompanionNear && da > 0.001f) _g.SetAim(Companion, (a[0] - b[0]) / da, (a[1] - b[1]) / da);

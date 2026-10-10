@@ -460,7 +460,7 @@ namespace EpidemicServer.Match
         /// Outpost is reached by a one-way drop (trigger character push) the navmesh has no route down, so they
         /// piled up at the edge (owner, 2026-10-07). One that hasn't moved StuckDistance in StuckSeconds while
         /// more than 25 units from the player is moved to a spot 45 units from the player with a clear line to
-        /// them (the player's own side of any wall).
+        /// them (the player's own side of any wall); closer if there is no such spot, and as a last resort beside them.
         /// </summary>
         private void ChaseUnstick(IEnumerable<object> chasers, float time)
         {
@@ -478,13 +478,16 @@ namespace EpidemicServer.Match
                 if (time - last[2] < StuckSeconds) continue;
                 float[] to = null;
                 double start = _random.NextDouble() * Math.PI * 2;
-                for (int k = 0; k < 12 && to == null; k++)
-                {
-                    double ang = start + k * Math.PI / 6;
-                    float[] c = { a[0] + (float)Math.Cos(ang) * 45f, a[1] + (float)Math.Sin(ang) * 45f };
-                    try { if (ServerHooks.LineClear(a, c)) to = c; } catch (Exception) { }
-                }
-                if (to == null) { _moved[z] = new[] { p[0], p[1], time }; continue; }
+                // 45 units first; in a tight spot (the pit) closer rings, then right beside the player, so a boss
+                // that can't get down is never left stuck (issue #7).
+                foreach (float r in new[] { 45f, 30f, 20f, 12f })
+                    for (int k = 0; k < 12 && to == null; k++)
+                    {
+                        double ang = start + k * Math.PI / 6;
+                        float[] c = { a[0] + (float)Math.Cos(ang) * r, a[1] + (float)Math.Sin(ang) * r };
+                        try { if (ServerHooks.LineClear(a, c)) to = c; } catch (Exception) { }
+                    }
+                if (to == null) to = new[] { a[0] + 8f, a[1] };
                 R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(z, new object[] { _g.Vector2(to[0], to[1]), true });
                 _moved[z] = new[] { to[0], to[1], time };
                 if (_chaseLogged++ < 20) _log("horde: " + ServerHooks.Describe(z) + " could not reach the player from " + Fmt(p) + " for " + StuckSeconds + " s; moved to " + Fmt(to));
@@ -591,7 +594,13 @@ namespace EpidemicServer.Match
             int add = victim == _hoarder ? HoarderSupplies : IsWalker(victim) ? WalkerSupplies : SpecialSupplies;
             Supplies += add;
             Set(R.Name("HordeState.Supplies"), Supplies);
-            if (victim == _hoarder) _log("horde: the hoarder died; supplies looted " + Supplies + " (+" + HoarderSupplies + ", stand-in)");
+            if (victim == _hoarder)
+            {
+                _log("horde: the hoarder died; supplies looted " + Supplies + " (+" + HoarderSupplies + ", stand-in)");
+                // Issue #6: the HUD state still said "hoarder active" until the wave ended, and the client kept the
+                // dead hoarder standing (no death animation, removed late). Clear it as it dies.
+                Set(R.Name("HordeState.Hoarder"), false);
+            }
         }
 
         // ---- death and respawn ----

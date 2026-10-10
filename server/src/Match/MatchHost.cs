@@ -116,22 +116,24 @@ namespace EpidemicServer.Match
         }
 
         /// <summary>
-        /// The character and infection level for the next match. The tutorial is the player at infection 1, as the
-        /// original. Otherwise the character the hub queued with, and the infection level from that loadout's
-        /// strength (GameRuntime.InfectionLevelFor; owner's choice 2026-10-07, matching the live game after v0.6).
-        /// </summary>
-        /// <summary>
         /// Share of the strength-based infection level a match actually uses (owner's choice 2026-10-10, 0.6, then 0.4, then 0.3 so a paddle kills a walker in 4 swings: the full
         /// level made zombies too tough, issue #2). Ours; the original server's rule is lost.
         /// </summary>
         public const double InfectionRamp = 0.3;
 
+        /// <summary>
+        /// The character and infection level for the next match: the character the hub queued with (the default hero
+        /// when there is none). The tutorial is at infection 1, as the original; otherwise the infection level from that loadout's
+        /// strength (GameRuntime.InfectionLevelFor; owner's choice 2026-10-07, matching the live game after v0.6).
+        /// </summary>
         private void ChooseCharacterAndInfection(bool tutorial)
         {
             MatchLoadout l = MatchLoadout.Current;
             Type characterEnum = Game.WorldType.GetMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
             string character = Enum.GetName(characterEnum, GameRuntime.DefaultHero);
-            if (!tutorial && l != null && Enum.IsDefined(characterEnum, (int)l.Character)) character = Enum.GetName(characterEnum, (int)l.Character);
+            // The hero the hub queued with, the tutorial included (issue #1: the tutorial always used the default
+            // hero). The tutorial still starts with fists at infection level 1, as the original.
+            if (l != null && l.Character != 0 && Enum.IsDefined(characterEnum, (int)l.Character)) character = Enum.GetName(characterEnum, (int)l.Character);
             Game.Character = character;
             Game.MatchLevel = 1;
             if (tutorial) return;

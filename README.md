@@ -418,28 +418,16 @@ or "ours" in the code. The notable ones:
 
 ### Known issues
 
-Not fixed yet. Each one is tracked as a GitHub issue.
+Not fixed yet. Each numbered one is tracked as a GitHub issue; fixed ones are listed in `CHANGELOG.md`.
 
-- The tutorial always puts you in the same character, whichever one you chose ([#1](../../issues/1)).
-- Infected levels are a bit overtuned: zombies are tougher than they should be ([#2](../../issues/2)).
+- Infected levels may still need tuning. A match now uses 30% of the strength-based level; tell us how it
+  feels ([#2](../../issues/2)).
 - When you join a match, the game usually shows an error about problems connecting
   to the server. Keep trying and you'll get into the match ([#3](../../issues/3)).
-- Special zombies (Puller, Floater, Ram and the others) never use their special attacks.
-  They only walk towards you; for example, the Puller never throws its hook ([#4](../../issues/4)).
-- Special zombies can be stun-locked: every basic attack from the player, melee or
-  ranged, stuns them ([#5](../../issues/5)).
-- The Hoarder plays no death animation, and its body doesn't disappear straight away
-  when it dies ([#6](../../issues/6)).
-- Horde on Outpost can soft-lock. The match ends when you defeat the elite that appears
-  after you defend the second flag. If you've already jumped into the drainage pit with
-  the gas cans, the elite can't reach you and the match can't finish. In the original
-  game the elite probably spawned in that pit. Until this is fixed, stay out of the pit
-  until the elite is dead ([#7](../../issues/7)).
+- In the tutorial, the companion sometimes slides instead of walking while she follows you.
 - Clicking on Horde then clicking the select option doesn't currently work. As a workaround, either double click on Horde to progress through the menu, or set up a lobby for Scavenger and switch the gamemode.
 
-
-
-How each mode works is in `docs/game-modes.md`, and how each problem was found and fixed is in `docs/devlog.md`.
+How each mode works is in `docs/game-modes.md`, what changed in each version is in `CHANGELOG.md`, and how each problem was found and fixed is in `docs/devlog.md`.
 
 ---
 

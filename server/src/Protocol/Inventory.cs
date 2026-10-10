@@ -55,6 +55,10 @@ namespace EpidemicServer.Protocol
                 a.Nodes.Insert(0, node);
                 changed = true;
             }
+            // Accounts that made their first hero pick before every starter hero was granted get the rest now.
+            StoryMapNode pick = a.Nodes.Find(n => n.Id == StoryMapRules.FirstCharacterNode);
+            if (pick != null && pick.Choices.Count == 1 && pick.Choices[0] != StoryMapRules.FirstCharacterPointsChoice && StoryMapRules.GrantStarterHeroes(a))
+                changed = true;
             return changed;
         }
 

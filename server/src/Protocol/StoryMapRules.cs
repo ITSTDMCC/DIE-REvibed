@@ -84,7 +84,7 @@ namespace EpidemicServer.Protocol
             return w.ToArray();
         }
 
-        /// <summary>Applies an unlock to the account. Only the first-character node grants anything so far.</summary>
+        /// <summary>Applies an unlock to the account. Only the first-character node grants anything so far (all four starter heroes for a hero pick).</summary>
         public static UnlockOutcome Unlock(Account a, int nodeId, byte[] choices)
         {
             foreach (StoryMapNode n in a.Nodes)
@@ -95,7 +95,7 @@ namespace EpidemicServer.Protocol
                 if (choices.Length != 1) return UnlockOutcome.WrongChoiceCount;
                 byte choice = choices[0];
                 if (choice < FirstCharacterChoices.Length)
-                    AddCharacter(a, FirstCharacterChoices[choice]);
+                    GrantStarterHeroes(a);
                 else if (choice == FirstCharacterPointsChoice)
                     a.HeroPoints += FirstCharacterPoints;
                 else
@@ -107,6 +107,19 @@ namespace EpidemicServer.Protocol
             node.Choices.AddRange(choices);
             a.Nodes.Add(node);
             return UnlockOutcome.Success;
+        }
+
+        /// <summary>
+        /// The four starter heroes (the survivor versions offered at the first pick). Owner's choice 2026-10-10: a new
+        /// account gets all four when it makes that pick, not only the one it picked (ours; the original gave one).
+        /// Returns true if anything was added.
+        /// </summary>
+        public static bool GrantStarterHeroes(Account a)
+        {
+            bool changed = false;
+            foreach (byte id in FirstCharacterChoices)
+                if (!a.Characters.Exists(c => c.Id == id && c.Owned)) { AddCharacter(a, id); changed = true; }
+            return changed;
         }
 
         private static void AddCharacter(Account a, byte id)

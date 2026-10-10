@@ -102,7 +102,8 @@ namespace EpidemicServer.Services
             // The hail is built at run time with the game's own serializers, so a match needs the game logic
             // (tools/run_server_mono.cmd, which passes --game).
             byte[] serverHail = null;
-            if (_host != null && _host.WaitReady(30000))
+            bool ready = _host != null && _host.WaitReady(30000);
+            if (ready)
             {
                 try
                 {
@@ -113,7 +114,8 @@ namespace EpidemicServer.Services
             }
             if (serverHail == null)
             {
-                Log.Error("match: no game logic loaded (start the server with tools/run_server_mono.cmd); refusing the match");
+                Log.Error(ready ? "match: refusing this match (see the error above); the next one is built afresh"
+                                : "match: no game logic loaded (start the server with tools/run_server_mono.cmd); refusing the match");
                 c.Close();
                 return;
             }

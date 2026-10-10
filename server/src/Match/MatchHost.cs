@@ -256,6 +256,27 @@ namespace EpidemicServer.Match
             catch (Exception e) { Log.Error("match: building the unlock catalog failed: " + GameRuntime.Unwrap(e)); }
         }
 
+        /// <summary>After a failed build: tear it down and load the tutorial match again; only if that fails too is the host marked failed.</summary>
+        private void RecoverWithTutorial()
+        {
+            try
+            {
+                TeardownMatch();
+                Game.MapIndex = GameRuntime.TutorialMap;
+                Game.ModeKind = GameRuntime.TutorialGameModeType;
+                Game.Difficulty = 0;
+                ChooseCharacterAndInfection(true);
+                BuildMatch();
+                _matchUsed = false;
+                Log.Info("match: recovered: the tutorial match is loaded again, so the next request can build its own match");
+            }
+            catch (Exception e)
+            {
+                Failed = true;
+                Log.Error("match: recovering with the tutorial failed too; restart the server: " + GameRuntime.Unwrap(e));
+            }
+        }
+
         /// <summary>True once a client has played the current match; the next one gets a fresh match.</summary>
         private bool _matchUsed;
 
@@ -408,8 +429,12 @@ namespace EpidemicServer.Match
                         try { BuildMatch(); }
                         catch (Exception e)
                         {
-                            Failed = true;
-                            throw new Exception("rebuilding the match failed: " + GameRuntime.Unwrap(e), e);
+                            // Refuse this match, but don't leave the server without a match: load the tutorial
+                            // again so the next request works (2026-10-10 playtest: one bad build refused every
+                            // later match until a restart).
+                            Log.Error("match: building the requested match failed: " + GameRuntime.Unwrap(e));
+                            RecoverWithTutorial();
+                            throw new Exception("rebuilding the match failed: " + GameRuntime.Unwrap(e).Message, e);
                         }
                         _matchUsed = false;
                     }

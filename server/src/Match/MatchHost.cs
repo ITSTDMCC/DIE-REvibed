@@ -120,6 +120,12 @@ namespace EpidemicServer.Match
         /// original. Otherwise the character the hub queued with, and the infection level from that loadout's
         /// strength (GameRuntime.InfectionLevelFor; owner's choice 2026-10-07, matching the live game after v0.6).
         /// </summary>
+        /// <summary>
+        /// Share of the strength-based infection level a match actually uses (owner's choice 2026-10-10: the full
+        /// level made zombies too tough, issue #2). Ours; the original server's rule is lost.
+        /// </summary>
+        public const double InfectionRamp = 0.6;
+
         private void ChooseCharacterAndInfection(bool tutorial)
         {
             MatchLoadout l = MatchLoadout.Current;
@@ -135,8 +141,10 @@ namespace EpidemicServer.Match
                 lock (_account) level = Leveling.AccountLevel(Game, AccountView.EffectiveXp(_account));
                 ushort melee = l != null && l.Melee != null ? l.Melee.SchematicId : Protocol.Inventory.DefaultMeleeSchematic;
                 ushort ranged = l != null && l.Ranged != null ? l.Ranged.SchematicId : Protocol.Inventory.DefaultRangedSchematic;
-                Game.MatchLevel = Math.Max(1, Game.InfectionLevelFor(character, level, melee, ranged, l == null ? null : l.Gadgets, _account.UserId, out strength));
-                Log.Info("match: " + character + " at account level " + level + " with " + melee + "/" + ranged + ": strength " + strength + " -> infection level " + Game.MatchLevel);
+                int full = Game.InfectionLevelFor(character, level, melee, ranged, l == null ? null : l.Gadgets, _account.UserId, out strength);
+                Game.MatchLevel = Math.Max(1, (int)Math.Round(full * InfectionRamp, MidpointRounding.AwayFromZero));
+                Log.Info("match: " + character + " at account level " + level + " with " + melee + "/" + ranged + ": strength " + strength + " -> infection level " + full +
+                         ", ramped x" + InfectionRamp + " -> " + Game.MatchLevel);
             }
             catch (Exception e) { Log.Warn("match: infection level from strength failed, using 1: " + GameRuntime.Unwrap(e).Message); }
         }

@@ -37,6 +37,9 @@ namespace EpidemicServer.Services
         /// <summary>Scavenger maps in turn (stand-in, as Horde): Resort, Jungle, Expedition (the three in matchmaking).</summary>
         private static readonly int[] ScavengerMaps = { 1, 2, 3 };
         private static int _nextScavengerMap;
+        /// <summary>Practice (Scout mission) maps, for the queue 6 path that sends no map (the solo path names one).</summary>
+        private static readonly int[] PracticeMaps = { 15, 16, 17 };
+        private static int _nextPracticeMap;
 
         private readonly byte[] _matchAddress;
         private readonly ushort _matchPort;
@@ -209,6 +212,12 @@ namespace EpidemicServer.Services
             {
                 int map = HordeMaps[_nextHordeMap % HordeMaps.Length];
                 _nextHordeMap++;
+                return map;
+            }
+            if (queueType == 6)
+            {
+                int map = PracticeMaps[_nextPracticeMap % PracticeMaps.Length];
+                _nextPracticeMap++;
                 return map;
             }
             return -1;

@@ -24,6 +24,9 @@ namespace EpidemicServer.Match
         public const float RespawnSeconds = 5f;
         /// <summary>The companion comes back this long after she dies (ours; the client has no rule for it).</summary>
         public const float CompanionReviveSeconds = 5f;
+        /// <summary>How soon to try again when the dead companion isn't back in the pool yet (ours).</summary>
+        private const float CompanionRetrySeconds = 0.5f;
+        private int _companionWaitLogged;
         /// <summary>the player respawns where she stood this long before she died: near the fight, on walkable ground (ours).</summary>
         public const float RespawnLookback = 4f;
         public const int FenceGroup = 3002, ElectricGroup = 3003, WoodenGroup = 10103;
@@ -387,13 +390,25 @@ namespace EpidemicServer.Match
             if (!Destroyed(Companion)) { _companionDiedAt = -1f; return; }
             if (_companionDiedAt < 0f) { _companionDiedAt = time; _log("tutorial: Companion died; she comes back near the player in " + CompanionReviveSeconds + " s"); return; }
             if (time - _companionDiedAt < CompanionReviveSeconds) return;
-            _companionDiedAt = -1f;
             object old = Companion;
-            ServerHooks.ForgetNpc(old);
             float[] at;
             if (_g.TutorialStage >= 8) { float[] a = ServerHooks.Position(_player); at = TrailPoint(time - 2f) ?? a; at = new[] { at[0], at[1], 0f, 1f }; }
             else at = _companionAt;
-            Companion = SpawnCompanion(at[0], at[1], at[2], at[3]);
+            // The game hands the dead companion back to its pool when it clears the body, about the same 5 s
+            // later; until then the pool is empty (2026-10-10 playtest: the revive came first and the error
+            // stopped the match). Wait and try again shortly instead.
+            object revived;
+            try { revived = SpawnCompanion(at[0], at[1], at[2], at[3]); }
+            catch (Exception e)
+            {
+                if (_companionWaitLogged++ < 3) _log("tutorial: companion not back in the pool yet, retrying (" + GameRuntime.Unwrap(e).Message + ")");
+                _companionDiedAt = time - CompanionReviveSeconds + CompanionRetrySeconds;
+                return;
+            }
+            _companionDiedAt = -1f;
+            _companionWaitLogged = 0;
+            ServerHooks.ForgetNpc(old);
+            Companion = revived;
             if (_g.TutorialStage >= 8)
             {
                 Companion.GetType().GetProperty(R.Name("Fighter.Master"), All).SetValue(Companion, _player, null);

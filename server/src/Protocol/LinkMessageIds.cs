@@ -34,6 +34,8 @@ namespace EpidemicServer.Protocol
         public const ushort DebugMatchTicket = 59;
         public const ushort RewardTablesAsk = 62;
         public const ushort PresenceNote = 65;
+        /// <summary>Put designs (perks) in a weapon's design slots (the hub's weapon modification).</summary>
+        public const ushort WeaponDesigns = 74;
         public const ushort UserInput = 75;
         public const ushort HubTime = 76;
     }

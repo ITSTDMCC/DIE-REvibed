@@ -24,6 +24,7 @@ namespace EpidemicServer.Services
             _store = store;
             _requests[LinkMessageIds.OpenNode] = HandleUnlockStoryMapNode;
             _requests[LinkMessageIds.MatchTicket] = HandleMatchmakingTicket;
+            _requests[LinkMessageIds.WeaponDesigns] = HandleWeaponDesigns;
             _requests[LinkMessageIds.SignIn] = HandleAuth;
             _requests[LinkMessageIds.PlatformSignIn] = HandleSteamAuth;
             _requests[LinkMessageIds.OffFeatureList] = delegate (Packet p) { return RequestServerEncoders.DisabledFeaturesResponse(); };
@@ -154,6 +155,64 @@ namespace EpidemicServer.Services
             w.WriteBool(true);
             w.WriteBytes(Guid.NewGuid().ToByteArray());
             return w.ToArray();
+        }
+
+        /// <summary>Crafting result codes the hub understands (ConductorCrafting.CraftingResultType).</summary>
+        private const int CraftSucceeded = 0, CraftWeaponNotOwned = 8, CraftNotEnoughCurrencies = 13;
+
+        /// <summary>
+        /// Weapon modification (ours, 2026-10-17: the request was unimplemented, so the hub showed "unknown error").
+        /// Request: bytes weapon GUID, varint count of (byte slot index, ushort perk id), then the expected cost as
+        /// CurrencyCollection (varint gold, silver, character points, research points). Reply: varint result, varint
+        /// slot index. On success the hub itself takes the cost off its wallet and updates the weapon's slots, so
+        /// the server stores the designs on the weapon and charges the same cost. A weapon the hub only sees through
+        /// unlockAll (AccountView, stable GUID) becomes a real one first so its designs are kept.
+        /// </summary>
+        private byte[] HandleWeaponDesigns(Packet p)
+        {
+            WireReader r = new WireReader(p.Body);
+            byte[] guid = r.ReadBytes();
+            uint count = r.ReadVarUInt32();
+            var changes = new List<KeyValuePair<byte, ushort>>();
+            for (uint i = 0; i < count; i++) changes.Add(new KeyValuePair<byte, ushort>(r.ReadByte(), r.ReadUInt16()));
+            int gold = r.ReadVarInt32(), silver = r.ReadVarInt32();
+            int result;
+            lock (_account)
+            {
+                OwnedUnique weapon = _account.Uniques.Find(u => SameGuid(u.Guid, guid));
+                if (weapon == null && _account.UnlockAll && UnlockCatalog.Ready)
+                    foreach (ushort id in UnlockCatalog.Weapons)
+                        if (SameGuid(UnlockCatalog.StableGuid("weapon", id), guid))
+                        {
+                            weapon = new OwnedUnique { Guid = guid, SchematicId = id };
+                            _account.Uniques.Add(weapon);
+                            break;
+                        }
+                if (weapon == null) result = CraftWeaponNotOwned;
+                else if (!_account.UnlimitedCurrency && (_account.Gold < gold || _account.Silver < silver)) result = CraftNotEnoughCurrencies;
+                else
+                {
+                    SortedDictionary<byte, ushort> slots = weapon.ReadSlots();
+                    foreach (KeyValuePair<byte, ushort> c in changes) slots[c.Key] = c.Value;
+                    weapon.WriteSlots(slots);
+                    if (!_account.UnlimitedCurrency) { _account.Gold -= gold; _account.Silver -= silver; }
+                    SaveAccount();
+                    result = CraftSucceeded;
+                }
+            }
+            Log.Info("request: weapon designs " + BitConverter.ToString(guid) + " slots [" +
+                     string.Join(", ", changes.ConvertAll(c => c.Key + "=" + c.Value).ToArray()) + "] cost gold " + gold + ", silver " + silver + ": result " + result);
+            WireWriter w = new WireWriter();
+            w.WriteVarInt32(result);
+            w.WriteVarInt32(changes.Count > 0 ? changes[0].Key : 0);
+            return w.ToArray();
+        }
+
+        private static bool SameGuid(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return false;
+            for (int i = 0; i < a.Length; i++) if (a[i] != b[i]) return false;
+            return true;
         }
 
         private void SaveAccount()

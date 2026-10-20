@@ -82,16 +82,16 @@ namespace EpidemicServer.Match
             {
                 m.Write((byte)i);
                 object c = g.GetClient(i);
-                c.GetType().GetMethod(R.Name("Net.WriteClientInfo"), All).Invoke(c, new[] { m.Buffer, (object)true });
+                c.GetType().CMethod(R.Name("Net.WriteClientInfo"), All).Invoke(c, new[] { m.Buffer, (object)true });
             }
             ServerHooks.QueueReliable(m.Buffer);
         }
 
-        public static bool IsDead(object o) { return (bool)o.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(o, null); }
+        public static bool IsDead(object o) { return (bool)o.GetType().CProp(R.Name("Entity.Dead"), All).GetValue(o, null); }
 
         public static bool Gone(object o)
         {
-            return o == null || IsDead(o) || !(bool)o.GetType().GetProperty("IsActive", All).GetValue(o, null);
+            return o == null || IsDead(o) || !(bool)o.GetType().CProp("IsActive", All).GetValue(o, null);
         }
 
         /// <summary>One tick of a bot's body: walk toward Goal (navmesh waypoints), face and hit Target in range.</summary>
@@ -123,7 +123,7 @@ namespace EpidemicServer.Match
                     if (spot != null)
                     {
                         object v = g.Vector2(spot[0], spot[1]);
-                        R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(p, new object[] { v, true });
+                        R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(p, new object[] { v, true });
                         if (Log != null) Log("scavenger: bot " + b.Name + " stuck at (" + here[0].ToString("0") + ", " + here[1].ToString("0") + ") for " + (time - b.ProgressAt).ToString("0") + " s; moved to (" + spot[0].ToString("0") + ", " + spot[1].ToString("0") + ")");
                         b.Path = null; b.ProgressAt = time; b.ProgressTo = to; b.BestDist = Dist(spot, to);
                         return;
@@ -212,20 +212,20 @@ namespace EpidemicServer.Match
         {
             if (pressed == b.PressedLast) return;
             b.PressedLast = pressed;
-            object bar = b.Player.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
-            bar.GetType().GetMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { b.AttackSlot, pressed });
+            object bar = b.Player.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
+            bar.GetType().CMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { b.AttackSlot, pressed });
         }
 
         /// <summary>Taps any ability slot (capture 19, deliver 17, steal 28, ...).</summary>
         public static void Tap(Bot b, int slot, bool pressed)
         {
-            object bar = b.Player.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
-            bar.GetType().GetMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { slot, pressed });
+            object bar = b.Player.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(b.Player, null);
+            bar.GetType().CMethod(R.Name("Fighter.Press"), All).Invoke(bar, new object[] { slot, pressed });
         }
 
         private static void SetInput(object p, int flags)
         {
-            PropertyInfo f = p.GetType().GetProperty(R.Name("Fighter.Input"), All);
+            PropertyInfo f = p.GetType().CProp(R.Name("Fighter.Input"), All);
             f.SetValue(p, Enum.ToObject(f.PropertyType, flags), null);
         }
 
@@ -235,7 +235,7 @@ namespace EpidemicServer.Match
             if (len < 0.001f) return;
             object dir = g.Vector2(dx / len, dy / len);
             ServerHooks.SetField(p, R.Name("Fighter.AimGoal"), dir);
-            PropertyInfo mouse = p.GetType().GetProperty("MousePosition", All);
+            PropertyInfo mouse = p.GetType().CProp("MousePosition", All);
             if (mouse != null && mouse.CanWrite) mouse.SetValue(p, g.Vector2(at[0], at[1]), null);
         }
 

@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+### Horde
+- **3 AI teammates in Horde.** Three random bot heroes join your team, fight zombies near them or near you,
+  follow you otherwise, and come back beside you 8 seconds after going down. Zombies target the nearest hero,
+  bots included.
+- **Pick the Horde map.** `server/bin/horde-map.txt` (made on first use) holds `outpost`, `lab` or `club` (or 5, 6, 7),
+  or `rotate` for the old rotation, which restarts at Outpost with every server start.
+
+### Hub
+- **Weapon modifications work.** The hub's request to put designs in a weapon's slots (type 74) was not handled, so
+  every purchase showed "unknown error". The slots are now saved with the weapon in `account.txt` (an optional
+  6th field on `unique=` lines) and sent back in the inventory; the price is charged unless unlimited currency is on.
+
+### Performance
+- **Reflection lookups are cached.** Profiling a Scavenger match showed the server at about 8 ticks a second
+  instead of 30 (AI, frame building and after-update hooks each spent tens of ms per tick), so hits and cooldowns
+  showed up seconds late. Much of that was looking up the game's properties, fields and methods by name on every
+  tick. Lookups now go through a cache keyed by type, name and flags (`ReflectionCache.cs`: about 0.2-0.3 µs a call
+  instead of 0.7-2.3 µs), and role names are memoized (`R.Name`).
+
 ## v0.3 (2026-10-10)
 
 ### No game names in the code

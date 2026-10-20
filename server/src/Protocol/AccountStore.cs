@@ -111,10 +111,11 @@ namespace EpidemicServer.Protocol
             // character=<id>:<owned>:<xp>
             foreach (OwnedCharacter c in a.Characters)
                 s.AppendLine("character=" + c.Id.ToString(CultureInfo.InvariantCulture) + ":" + (c.Owned ? "true" : "false") + ":" + Str(c.Xp));
-            // unique=<guid hex>:<schematic id>:<in inventory>:<durability>:<ep>
+            // unique=<guid hex>:<schematic id>:<in inventory>:<durability>:<ep>[:<design slots hex>]
             foreach (OwnedUnique u in a.Uniques)
                 s.AppendLine("unique=" + BitConverter.ToString(u.Guid).Replace("-", "") + ":" + u.SchematicId.ToString(CultureInfo.InvariantCulture) + ":" +
-                             (u.InBag ? "true" : "false") + ":" + Str(u.Durability) + ":" + Str(u.Ep));
+                             (u.InBag ? "true" : "false") + ":" + Str(u.Durability) + ":" + Str(u.Ep) +
+                             (u.Slots != null && u.Slots.Length > 0 ? ":" + BitConverter.ToString(u.Slots).Replace("-", "") : ""));
 
             // stackable=<id>:<stackable type>:<amount>
             foreach (OwnedStackable st in a.Stackables)
@@ -159,6 +160,12 @@ namespace EpidemicServer.Protocol
             u.InBag = parts[2] == "true";
             u.Durability = Int(parts[3]);
             u.Ep = Int(parts[4]);
+            if (parts.Length > 5 && parts[5].Length >= 4)
+            {
+                u.Slots = new byte[parts[5].Length / 2];
+                for (int i = 0; i < u.Slots.Length; i++)
+                    u.Slots[i] = byte.Parse(parts[5].Substring(i * 2, 2), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            }
             return u;
         }
 

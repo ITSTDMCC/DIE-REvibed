@@ -84,8 +84,8 @@ namespace EpidemicServer.Match
         {
             Type e = _hub.GetType(R.Name("Type.HeroId"), true);
             Type loader = _hub.GetType(R.Name("Type.HeroLoader"), true);
-            loader.GetMethod("Initialize", All).Invoke(null, null);
-            IDictionary prefabs = (IDictionary)loader.GetField(R.Name("HeroLoader.Prefabs"), All).GetValue(null);
+            loader.CMethod("Initialize", All).Invoke(null, null);
+            IDictionary prefabs = (IDictionary)loader.CField(R.Name("HeroLoader.Prefabs"), All).GetValue(null);
             return e.GetFields(BindingFlags.Public | BindingFlags.Static)
                 .Where(f => Convert.ToInt32(f.GetValue(null)) > 0 && !f.GetCustomAttributes(false).Any(a => a.GetType().Name == R.Name("Type.HiddenMark")) &&
                             prefabs != null && prefabs.Contains(f.GetValue(null)))
@@ -95,7 +95,7 @@ namespace EpidemicServer.Match
         public byte[] Build(RewardsInput input)
         {
             Type rewardsType = _hub.GetType(R.Name("Type.Payout"), true);
-            FieldInfo dataField = rewardsType.GetField("Data");
+            FieldInfo dataField = rewardsType.CField("Data");
             Type dataType = dataField.FieldType;
             object data = Activator.CreateInstance(dataType);
             Set(data, R.Name("Record.Kills"), input.UndeadKills);
@@ -117,22 +117,22 @@ namespace EpidemicServer.Match
             Set(data, R.Name("Record.CrossScores"), new byte[0]);
             Set(data, R.Name("Record.CrossKinds"), new byte[0]);
 
-            FieldInfo boxesField = dataType.GetField(R.Name("Record.Boxes"));
+            FieldInfo boxesField = dataType.CField(R.Name("Record.Boxes"));
             Type boxType = boxesField.FieldType.GetElementType();
             Array boxes = Array.CreateInstance(boxType, input.BoxIds.Length);
             for (int i = 0; i < boxes.Length; i++)
             {
                 object box = Activator.CreateInstance(boxType);
-                FieldInfo id = boxType.GetField("ID");
+                FieldInfo id = boxType.CField("ID");
                 id.SetValue(box, Enum.ToObject(id.FieldType, input.BoxIds[i]));
-                boxType.GetField("Score").SetValue(box, input.BoxPoints[i]);
+                boxType.CField("Score").SetValue(box, input.BoxPoints[i]);
                 boxes.SetValue(box, i);
             }
             boxesField.SetValue(data, boxes);
 
             foreach (string name in new[] { R.Name("Record.Rewards"), R.Name("Record.FirstVictory") })
             {
-                FieldInfo f = dataType.GetField(name);
+                FieldInfo f = dataType.CField(name);
                 object collection = Activator.CreateInstance(f.FieldType);
                 FillEmpty(collection);
                 if (name == R.Name("Record.Rewards")) Set(collection, R.Name("Record.AccountXp"), input.AccountXp);
@@ -141,11 +141,11 @@ namespace EpidemicServer.Match
 
             object rewards = Activator.CreateInstance(rewardsType);
             dataField.SetValue(rewards, data);
-            FieldInfo players = rewardsType.GetField(R.Name("Record.Players"));
+            FieldInfo players = rewardsType.CField(R.Name("Record.Players"));
             Type playerType = players.FieldType.GetElementType();
             object player = Activator.CreateInstance(playerType);
-            playerType.GetField(R.Name("Record.Account")).SetValue(player, input.SteamId);
-            FieldInfo team = playerType.GetField(R.Name("Record.Team"));
+            playerType.CField(R.Name("Record.Account")).SetValue(player, input.SteamId);
+            FieldInfo team = playerType.CField(R.Name("Record.Team"));
             team.SetValue(player, Enum.ToObject(team.FieldType, (int)input.Team));
             Array list = Array.CreateInstance(playerType, 1);
             list.SetValue(player, 0);
@@ -187,13 +187,13 @@ namespace EpidemicServer.Match
 
         private static void Set(object o, string name, object value)
         {
-            FieldInfo f = o.GetType().GetField(name);
+            FieldInfo f = o.GetType().CField(name);
             f.SetValue(o, Convert.ChangeType(value, f.FieldType));
         }
 
         private static void SetEnum(object o, string name, int value)
         {
-            FieldInfo f = o.GetType().GetField(name);
+            FieldInfo f = o.GetType().CField(name);
             f.SetValue(o, Enum.ToObject(f.FieldType, value));
         }
 

@@ -119,8 +119,8 @@ namespace EpidemicServer.Match
                 if (kind == R.Name("MapKind.StaticSpawn"))
                 {
                     object z = _g.SpawnNpc(GameRuntime.PlainZombieType, p[0], p[1], GameRuntime.ZombieTeam, d);
-                    object state = o.GetType().GetProperty(R.Name("Npc.Pose"), All).GetValue(o, null);
-                    try { z.GetType().GetProperty(R.Name("Npc.PoseNow"), All).SetValue(z, state, null); }
+                    object state = o.GetType().CProp(R.Name("Npc.Pose"), All).GetValue(o, null);
+                    try { z.GetType().CProp(R.Name("Npc.PoseNow"), All).SetValue(z, state, null); }
                     catch (Exception e) { _log("could not set the spawn state " + state + ": " + GameRuntime.Unwrap(e).Message); }
                     ServerHooks.AggroRange[z] = StaticAggroRange;
                     Zombies.Add(z);
@@ -128,7 +128,7 @@ namespace EpidemicServer.Match
                 }
                 else if (kind == R.Name("MapKind.Roamers"))
                 {
-                    int min = (int)o.GetType().GetField(R.Name("Map.WalkersLow")).GetValue(o), max = (int)o.GetType().GetField(R.Name("Map.WalkersHigh")).GetValue(o);
+                    int min = (int)o.GetType().CField(R.Name("Map.WalkersLow")).GetValue(o), max = (int)o.GetType().CField(R.Name("Map.WalkersHigh")).GetValue(o);
                     int count = _random.Next(min, max + 1);
                     for (int i = 0; i < count; i++)
                     {
@@ -139,7 +139,7 @@ namespace EpidemicServer.Match
                 }
                 else if (kind == R.Name("MapKind.Breakable"))
                 {
-                    int group = (int)o.GetType().GetField(R.Name("Map.Group")).GetValue(o);
+                    int group = (int)o.GetType().CField(R.Name("Map.Group")).GetValue(o);
                     object barricade = SpawnBarricade(o, p, d);
                     if (!BarricadeGroups.ContainsKey(group)) BarricadeGroups[group] = new List<object>();
                     BarricadeGroups[group].Add(barricade);
@@ -166,7 +166,7 @@ namespace EpidemicServer.Match
                     _generatorAt = new[] { p[0], p[1] };
                 else if (kind == R.Name("MapKind.TutorialMark"))
                 {
-                    string type = o.GetType().GetField(R.Name("Map.TutorialKind")).GetValue(o).ToString();
+                    string type = o.GetType().CField(R.Name("Map.TutorialKind")).GetValue(o).ToString();
                     float[] at = new[] { p[0], p[1], d[0], d[1] };
                     if (type == R.Name("TutorialMark.Weapon")) _paddleAt = at;
                     else if (type == R.Name("TutorialMark.Companion")) _companionAt = at;
@@ -184,10 +184,10 @@ namespace EpidemicServer.Match
             foreach (var kv in BarricadeGroups)
             {
                 object group = groupType.GetConstructor(All, null, new[] { typeof(int), typeof(int) }, null).Invoke(new object[] { kv.Key, (int)BarricadeFallbackHp });
-                foreach (object piece in kv.Value) groupType.GetMethod(R.Name("BarricadeGroup.Add"), All).Invoke(group, new[] { piece });
+                foreach (object piece in kv.Value) groupType.CMethod(R.Name("BarricadeGroup.Add"), All).Invoke(group, new[] { piece });
             }
             foreach (object piece in Group(ElectricGroup))
-                piece.GetType().GetMethod(R.Name("Barricade.MakeInvulnerable"), All).Invoke(piece, null);
+                piece.GetType().CMethod(R.Name("Barricade.MakeInvulnerable"), All).Invoke(piece, null);
             _log("tutorial: ambush " + AmbushId + " has " + AmbushPoints.Count + " MapKind.EventSpawns points; storage room " + StorageId + " has " + StorageSpots.Count +
                  ", enemy marker " + (_enemyAt != null) + ", Floater assault " + (_floaterAt != null) + ", truck markers " + _truckerAt.Count);
             SpawnTruckers();
@@ -195,7 +195,7 @@ namespace EpidemicServer.Match
             ServerHooks.DamageFilter = (entity, changer, value) =>
             {
                 if (_g.TutorialStage != 12 || !Group(WoodenGroup).Contains(entity) || changer == null) return value;
-                object owner = changer == _player ? _player : GetField(changer, "Owner") ?? (changer.GetType().GetProperty("Owner", All) == null ? null : changer.GetType().GetProperty("Owner", All).GetValue(changer, null));
+                object owner = changer == _player ? _player : GetField(changer, "Owner") ?? (changer.GetType().CProp("Owner", All) == null ? null : changer.GetType().CProp("Owner", All).GetValue(changer, null));
                 return owner == _player ? value * PlayerBarricadeDamage : value;
             };
             // Ambush walkers go for whichever of the player and Companion is nearer.
@@ -215,29 +215,29 @@ namespace EpidemicServer.Match
             Type t = R.Type("Barrier");
             object b = _g.TakeFromPool(t);
             Type mt = map.GetType();
-            b.GetType().GetField("Position", All).SetValue(b, _g.Vector2(p[0], p[1]));
-            b.GetType().GetField(R.Name("Map.Position"), All).SetValue(b, _g.Vector2(p[0], p[1]));
-            t.GetField(R.Name("Barricade.Facing"), All).SetValue(b, _g.Vector2(d[0], d[1]));
-            FieldInfo part = t.GetField(R.Name("Barricade.Part"), All);
-            part.SetValue(b, Enum.Parse(part.FieldType, mt.GetField(R.Name("Map.Piece")).GetValue(map).ToString()));
-            t.GetField(R.Name("Barricade.Kind"), All).SetValue(b, mt.GetField(R.Name("Map.BarricadeKind")).GetValue(map));
+            b.GetType().CField("Position", All).SetValue(b, _g.Vector2(p[0], p[1]));
+            b.GetType().CField(R.Name("Map.Position"), All).SetValue(b, _g.Vector2(p[0], p[1]));
+            t.CField(R.Name("Barricade.Facing"), All).SetValue(b, _g.Vector2(d[0], d[1]));
+            FieldInfo part = t.CField(R.Name("Barricade.Part"), All);
+            part.SetValue(b, Enum.Parse(part.FieldType, mt.CField(R.Name("Map.Piece")).GetValue(map).ToString()));
+            t.CField(R.Name("Barricade.Kind"), All).SetValue(b, mt.CField(R.Name("Map.BarricadeKind")).GetValue(map));
             // The map says Team2. The fence and wooden pieces are spawned Neutral so a Team2
             // player can break them; the electric fence keeps Team2 so her hits don't count
             // (owner's design, steps 4b and 4d).
-            int groupId = (int)mt.GetField(R.Name("Map.Group")).GetValue(map);
+            int groupId = (int)mt.CField(R.Name("Map.Group")).GetValue(map);
             string teamName = groupId == ElectricGroup ? R.Name("Team.Two") : R.Name("Team.None");
-            FieldInfo team = t.GetField(R.Name("Barricade.Team"), All);
+            FieldInfo team = t.CField(R.Name("Barricade.Team"), All);
             team.SetValue(b, Enum.Parse(team.FieldType, teamName));
-            b.GetType().GetProperty(R.Name("Entity.Team"), All).SetValue(b, Enum.Parse(team.FieldType, teamName), null);
-            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { b, null, null });
+            b.GetType().CProp(R.Name("Entity.Team"), All).SetValue(b, Enum.Parse(team.FieldType, teamName), null);
+            _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { b, null, null });
             float hp = ServerHooks.GetStat(b, R.Name("Stat.HealthMax"));
             string source = "its own default";
             // The client has no default for map barricades (only the horde spawner sets hp,
             // to max float); the original server chose it. Fallback, open question.
             if (hp <= 0) { hp = BarricadeFallbackHp; source = "fallback: the client has no default"; }
-            t.GetMethod(R.Name("Barricade.SetHealth"), All).Invoke(b, new object[] { hp });
-            _log("tutorial: barricade " + ServerHooks.Describe(b) + " " + mt.GetField(R.Name("Map.BarricadeKind")).GetValue(map) + " " + mt.GetField(R.Name("Map.Piece")).GetValue(map) +
-                 " group " + mt.GetField(R.Name("Map.Group")).GetValue(map) + " at (" + p[0].ToString("0") + ", " + p[1].ToString("0") + "), hp " + hp + " (" + source +
+            t.CMethod(R.Name("Barricade.SetHealth"), All).Invoke(b, new object[] { hp });
+            _log("tutorial: barricade " + ServerHooks.Describe(b) + " " + mt.CField(R.Name("Map.BarricadeKind")).GetValue(map) + " " + mt.CField(R.Name("Map.Piece")).GetValue(map) +
+                 " group " + mt.CField(R.Name("Map.Group")).GetValue(map) + " at (" + p[0].ToString("0") + ", " + p[1].ToString("0") + "), hp " + hp + " (" + source +
                  "), Health now " + ServerHooks.GetStat(b, R.Name("Stat.Health")));
             return b;
         }
@@ -301,7 +301,7 @@ namespace EpidemicServer.Match
                 SetStage(8, "the Puller is dead");
             else if (stage == 8 && _generatorAt != null && Distance(a, _generatorAt[0], _generatorAt[1]) <= GeneratorRange)
                 SetStage(9, "the player is within " + GeneratorRange + " units of the generator");
-            else if (stage == 9 && Generator != null && !(bool)Generator.GetType().GetProperty("IsActive", All).GetValue(Generator, null))
+            else if (stage == 9 && Generator != null && !(bool)Generator.GetType().CProp("IsActive", All).GetValue(Generator, null))
                 SetStage(10, "the generator is destroyed");
             else if (stage == 10 && _preBarricadeAt != null && Distance(a, _preBarricadeAt[0], _preBarricadeAt[1]) <= PreBarricadeRange)
                 SetStage(11, "the player is within " + PreBarricadeRange + " units of TutorialMark.BeforeBarricade");
@@ -374,7 +374,7 @@ namespace EpidemicServer.Match
             // The tutorial NPC type's own movement setup (Tutorial.NpcBase.SetupMovement: walk/sprint acceleration,
             // friction, max speed). Nothing in the client calls it, so the server must; it is
             // also what Companion's sync sends. Then apply the walk values as reset NPC does.
-            R.Type("Tutorial.NpcBase").GetMethod(R.Name("Tutorial.NpcBase.SetupMovement"), All, null, Type.EmptyTypes, null).Invoke(companion, null);
+            R.Type("Tutorial.NpcBase").CMethod(R.Name("Tutorial.NpcBase.SetupMovement"), All, null, Type.EmptyTypes, null).Invoke(companion, null);
             ServerHooks.SetField(companion, R.Name("Npc.Drag"), ServerHooks.GetFieldValue(companion, R.Name("Zombie.Base.Friction")));
             return companion;
         }
@@ -411,7 +411,7 @@ namespace EpidemicServer.Match
             Companion = revived;
             if (_g.TutorialStage >= 8)
             {
-                Companion.GetType().GetProperty(R.Name("Fighter.Master"), All).SetValue(Companion, _player, null);
+                Companion.GetType().CProp(R.Name("Fighter.Master"), All).SetValue(Companion, _player, null);
                 ServerHooks.SetField(Companion, R.Name("Npc.Accel"), ServerHooks.GetFieldValue(Companion, R.Name("Zombie.Base.Acceleration")));
             }
             else ServerHooks.SetField(Companion, R.Name("Npc.Accel"), 0f);
@@ -426,7 +426,7 @@ namespace EpidemicServer.Match
             if (Buffs(Companion).Contains(R.Short("Buff.Hooked")))
             {
                 _log("tutorial: Companion has the hook buff (" + Buffs(Companion) + ")");
-                Puller.GetType().GetMethod(R.Name("Npc.FreeTarget"), All).Invoke(Puller, null);
+                Puller.GetType().CMethod(R.Name("Npc.FreeTarget"), All).Invoke(Puller, null);
                 ServerHooks.Passive.Remove(Puller);
                 ServerHooks.HoldPosition.Add(Puller);
                 ServerHooks.AggroRange[Puller] = PullerStrikeRange;
@@ -438,17 +438,17 @@ namespace EpidemicServer.Match
             // toward the nearest enemy (the player) and the hook flies at her instead.
             float[] pu = ServerHooks.Position(Puller), b = ServerHooks.Position(Companion);
             float dx = b[0] - pu[0], dy = b[1] - pu[1], d = Math.Max((float)Math.Sqrt(dx * dx + dy * dy), 0.001f);
-            if (Puller.GetType().GetProperty(R.Name("Npc.Target"), All).GetValue(Puller, null) != Companion)
+            if (Puller.GetType().CProp(R.Name("Npc.Target"), All).GetValue(Puller, null) != Companion)
             {
-                Puller.GetType().GetMethod(R.Name("Npc.PinTarget"), All).Invoke(Puller, new[] { Companion });
-                Puller.GetType().GetProperty(R.Name("Npc.UseTarget"), All).SetValue(Puller, false, null);
+                Puller.GetType().CMethod(R.Name("Npc.PinTarget"), All).Invoke(Puller, new[] { Companion });
+                Puller.GetType().CProp(R.Name("Npc.UseTarget"), All).SetValue(Puller, false, null);
             }
             _g.SetAim(Puller, dx / d, dy / d);
             if (time - _lastHookTry < HookRetrySeconds) return;
             _lastHookTry = time;
             object dir = _g.Vector2(dx / d, dy / d);
             object hook = Ability(R.Name("Ability.PullerGrab"));
-            bool cast = (bool)Puller.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), hook.GetType() }, null).Invoke(Puller, new[] { dir, hook });
+            bool cast = (bool)Puller.GetType().CMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), hook.GetType() }, null).Invoke(Puller, new[] { dir, hook });
             _log("tutorial: the Puller casts Ability.PullerGrab at Companion (" + d.ToString("0") + " units)" + (cast ? "" : " (refused)"));
         }
 
@@ -472,7 +472,7 @@ namespace EpidemicServer.Match
             {
                 if (z == null || Destroyed(z)) continue;
                 // Only awake zombies: ones still lying or sitting in their spawn pose are left alone.
-                PropertyInfo pose = z.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
+                PropertyInfo pose = z.GetType().CProp(R.Name("Npc.PoseNow"), All);
                 if (pose != null && Convert.ToInt32(pose.GetValue(z, null)) != 0) continue;
                 float[] zp = ServerHooks.Position(z);
                 float dz = Distance(a, zp[0], zp[1]);
@@ -503,7 +503,7 @@ namespace EpidemicServer.Match
             _companionLastAttack = time;
             object dir = _g.Vector2(dx / d, dy / d);
             float before = ServerHooks.GetStat(target, R.Name("Stat.Health"));
-            bool accepted = (bool)Companion.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(Companion, new[] { dir, ability });
+            bool accepted = (bool)Companion.GetType().CMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(Companion, new[] { dir, ability });
             float ax = a[0] - b[0], ay = a[1] - b[1], ad = Math.Max((float)Math.Sqrt(ax * ax + ay * ay), 0.001f);
             double offPlayer = Math.Acos(Math.Max(-1, Math.Min(1, dx / d * ax / ad + dy / d * ay / ad))) * 180 / Math.PI;
             _log("tutorial: Companion attacks " + (what ?? ServerHooks.Describe(target)) + " " + ServerHooks.Describe(target) + " at " + d.ToString("0") + " units with " + ability +
@@ -519,9 +519,9 @@ namespace EpidemicServer.Match
             object at = _g.Vector2(_generatorAt[0], _generatorAt[1]);
             ServerHooks.SetField(gen, "Position", at);
             ServerHooks.SetField(gen, R.Name("Map.Position"), at);
-            PropertyInfo team = gen.GetType().GetProperty(R.Name("Entity.Team"), All);
+            PropertyInfo team = gen.GetType().CProp(R.Name("Entity.Team"), All);
             team.SetValue(gen, Enum.Parse(team.PropertyType, R.Name("Team.None")), null);
-            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { gen, null, null });
+            _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { gen, null, null });
             Generator = gen;
             _log("tutorial: generator " + ServerHooks.Describe(gen) + " at (" + _generatorAt[0] + ", " + _generatorAt[1] + "), Health " +
                  ServerHooks.GetStat(gen, R.Name("Stat.Health")) + "/" + ServerHooks.GetStat(gen, R.Name("Stat.HealthMax")));
@@ -532,11 +532,11 @@ namespace EpidemicServer.Match
         {
             foreach (object piece in Group(ElectricGroup))
             {
-                piece.GetType().GetMethod(R.Name("Barricade.MakeVulnerable"), All).Invoke(piece, null);
+                piece.GetType().CMethod(R.Name("Barricade.MakeVulnerable"), All).Invoke(piece, null);
                 _g.SetStat(piece, R.Name("Stat.Health"), 0f);
             }
             _log("tutorial: electric fence off: " + string.Join(", ", Group(ElectricGroup).Select(x => ServerHooks.Describe(x) + " Health " + ServerHooks.GetStat(x, R.Name("Stat.Health")) +
-                 " collision " + x.GetType().GetProperty(R.Name("Npc.Solid"), All).GetValue(x, null)).ToArray()));
+                 " collision " + x.GetType().CProp(R.Name("Npc.Solid"), All).GetValue(x, null)).ToArray()));
         }
 
         /// <summary>
@@ -565,7 +565,7 @@ namespace EpidemicServer.Match
                 object z = _g.SpawnNpc(GameRuntime.PlainZombieType, pt.X, pt.Y, GameRuntime.ZombieTeam, new[] { pt.DX, pt.DY });
                 if (pt.State != null)
                 {
-                    PropertyInfo ss = z.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
+                    PropertyInfo ss = z.GetType().CProp(R.Name("Npc.PoseNow"), All);
                     ss.SetValue(z, Enum.ToObject(ss.PropertyType, Convert.ToInt32(pt.State)), null);
                 }
                 AmbushZombies.Add(z);
@@ -588,9 +588,9 @@ namespace EpidemicServer.Match
             }
             else if (hint == 1)
             {
-                object bar = _player.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(_player, null);
-                object casting = bar == null ? null : bar.GetType().GetProperty(R.Name("Fighter.Casting"), All).GetValue(bar, null);
-                object id = casting == null ? null : casting.GetType().GetProperty(R.Name("Ability.Key"), All).GetValue(casting, null);
+                object bar = _player.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(_player, null);
+                object casting = bar == null ? null : bar.GetType().CProp(R.Name("Fighter.Casting"), All).GetValue(bar, null);
+                object id = casting == null ? null : casting.GetType().CProp(R.Name("Ability.Key"), All).GetValue(casting, null);
                 if (id != null && id.ToString().Contains(R.Name("Ability.Heal")))
                 {
                     _g.SetTutorialField(HintBandage, 2);
@@ -606,16 +606,16 @@ namespace EpidemicServer.Match
         {
             Type t = R.Type("Type.Room");
             object room = _g.TakeFromPool(t);
-            t.GetField("ID", All).SetValue(room, (ushort)StorageId);
-            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { room, null, null });
-            if (t.GetField(R.Name("MapKind.RoomPoint"), All).GetValue(room) == null) t.GetMethod(R.Name("Room.Link"), All).Invoke(room, null);
+            t.CField("ID", All).SetValue(room, (ushort)StorageId);
+            _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { room, null, null });
+            if (t.CField(R.Name("MapKind.RoomPoint"), All).GetValue(room) == null) t.CMethod(R.Name("Room.Link"), All).Invoke(room, null);
             RoomEntity = room;
             ServerHooks.PressNote = () =>
             {
-                float[] r = ServerHooks.Vector(room.GetType().GetProperty("Position", All).GetValue(room, null)), a = ServerHooks.Position(_player);
+                float[] r = ServerHooks.Vector(room.GetType().CProp("Position", All).GetValue(room, null)), a = ServerHooks.Position(_player);
                 return "storage room " + Distance(a, r[0], r[1]).ToString("0.0") + " units away";
             };
-            object point = t.GetField(R.Name("MapKind.RoomPoint"), All).GetValue(room);
+            object point = t.CField(R.Name("MapKind.RoomPoint"), All).GetValue(room);
             _log("tutorial: storage room " + ServerHooks.Describe(room) + " ID " + StorageId + ", linked to its point " + (point != null) +
                  (point == null ? "" : " at (" + string.Join(", ", ServerHooks.Vector(GetField(point, R.Name("MapPoint.Position"))).Select(v => v.ToString("0")).ToArray()) + ")"));
         }
@@ -633,21 +633,21 @@ namespace EpidemicServer.Match
         {
             if (_captureBuff == null)
             {
-                IEnumerable list = (IEnumerable)_player.GetType().GetProperty(R.Name("Entity.EffectList"), All).GetValue(_player, null);
+                IEnumerable list = (IEnumerable)_player.GetType().CProp(R.Name("Entity.EffectList"), All).GetValue(_player, null);
                 _captureBuff = list == null ? null : list.Cast<object>().FirstOrDefault(b => b != null && b.GetType().Name == R.Short("Buff.CaptureChannel"));
                 if (_captureBuff != null) _log("tutorial: the player started the capture channel");
                 return;
             }
-            if ((bool)_captureBuff.GetType().GetProperty("IsActive").GetValue(_captureBuff, null)) return;
-            float age = (float)_captureBuff.GetType().GetProperty("Age").GetValue(_captureBuff, null);
+            if ((bool)_captureBuff.GetType().CProp("IsActive").GetValue(_captureBuff, null)) return;
+            float age = (float)_captureBuff.GetType().CProp("Age").GetValue(_captureBuff, null);
             float needed = (float)GetField(_captureBuff, R.Name("Buff.CaptureChannel.Needed")), range = (float)GetField(_captureBuff, R.Name("Buff.CaptureChannel.Range"));
             object buff = _captureBuff;
             _captureBuff = null;
-            float[] a = ServerHooks.Position(_player), r = ServerHooks.Vector(RoomEntity.GetType().GetProperty("Position", All).GetValue(RoomEntity, null));
+            float[] a = ServerHooks.Position(_player), r = ServerHooks.Vector(RoomEntity.GetType().CProp("Position", All).GetValue(RoomEntity, null));
             bool close = Distance(a, r[0], r[1]) <= range;
             if (age >= needed - 0.25f && close && !GetField(RoomEntity, R.Name("Mode.CaptureFinished")).Equals(PlayerTeamId()))
             {
-                _g.ActiveMode.GetType().GetMethod(R.Name("Mode.OnCapture"), All).Invoke(_g.ActiveMode, new[] { _player });
+                _g.ActiveMode.GetType().CMethod(R.Name("Mode.OnCapture"), All).Invoke(_g.ActiveMode, new[] { _player });
                 _log("tutorial: capture channel ended at age " + age.ToString("0.00") + " of " + needed + " s; completed the capture (tick timing)");
             }
             else _log("tutorial: capture channel ended at age " + age.ToString("0.00") + " of " + needed + " s, " + (close ? "in range" : "out of range") + "; no capture");
@@ -658,7 +658,7 @@ namespace EpidemicServer.Match
         /// <summary>The game mode's delivery point (TutorialSupplyPoint, from MapKind.DriverStart): its position and radius.</summary>
         private object DeliveryPoint()
         {
-            IEnumerable list = (IEnumerable)_g.ActiveMode.GetType().GetProperty(R.Name("Map.Objects"), All).GetValue(_g.ActiveMode, null);
+            IEnumerable list = (IEnumerable)_g.ActiveMode.GetType().CProp(R.Name("Map.Objects"), All).GetValue(_g.ActiveMode, null);
             return list == null ? null : list.Cast<object>().FirstOrDefault(o => o != null && o.GetType().Name == R.Short("TutorialSupplyPoint"));
         }
 
@@ -687,7 +687,7 @@ namespace EpidemicServer.Match
                 if (amount <= 0 || !InDeliveryCircle(landing, out d, out radius)) continue;
                 _seenThrows.Add(o);
                 object supplies = Supplies();
-                MethodInfo credit = supplies.GetType().GetMethod(R.Name("Supplies.AddDelivered"), All);
+                MethodInfo credit = supplies.GetType().CMethod(R.Name("Supplies.AddDelivered"), All);
                 credit.Invoke(supplies, new[] { Enum.Parse(credit.GetParameters()[0].ParameterType, GameRuntime.PlayerTeam), (object)amount, Activator.CreateInstance(credit.GetParameters()[2].ParameterType) });
                 _log("tutorial: " + amount + " supplies thrown into the delivery circle (" + d.ToString("0.0") + " units); counted as delivered (team now " + SuppliesBanked() + ")");
             }
@@ -708,7 +708,7 @@ namespace EpidemicServer.Match
                     object z = _g.SpawnNpc(GameRuntime.PlainZombieType, pt.X, pt.Y, GameRuntime.ZombieTeam, new[] { pt.DX, pt.DY });
                     if (pt.State != null)
                     {
-                        PropertyInfo ss = z.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
+                        PropertyInfo ss = z.GetType().CProp(R.Name("Npc.PoseNow"), All);
                         ss.SetValue(z, Enum.ToObject(ss.PropertyType, Convert.ToInt32(pt.State)), null);
                     }
                     StorageZombies.Add(z);
@@ -732,13 +732,13 @@ namespace EpidemicServer.Match
             // pickups find no slot for her (Supplies.Carried returns -1) and give nothing.
             object supplies = Supplies();
             Array slots = (Array)GetField(supplies, R.Name("Supplies.Slots"));
-            ushort me = (ushort)_player.GetType().GetProperty(R.Name("Entity.HeroIndex"), All).GetValue(_player, null);
+            ushort me = (ushort)_player.GetType().CProp(R.Name("Entity.HeroIndex"), All).GetValue(_player, null);
             bool registered = slots != null && slots.Cast<object>().Any(x => x != null && (int)GetField(x, R.Name("SupplySlot.Player")) == me);
-            if (!registered) supplies.GetType().GetMethod(R.Name("Supplies.Register"), All).Invoke(supplies, new[] { _player });
+            if (!registered) supplies.GetType().CMethod(R.Name("Supplies.Register"), All).Invoke(supplies, new[] { _player });
             slots = (Array)GetField(supplies, R.Name("Supplies.Slots"));
             _log("tutorial: supplies initialised " + GetField(supplies, R.Name("Supplies.Initialised")) + ", the player (player " + me + ") registered before " + registered + ", slots " +
                  (slots == null ? "null" : string.Join(",", slots.Cast<object>().Select(x => x == null ? "-" : GetField(x, R.Name("SupplySlot.Player")) + ":" + GetField(x, R.Name("SupplySlot.Amount"))).ToArray())));
-            object balance = _g.WorldType.GetField(R.Name("World.Balance"), All).GetValue(null);
+            object balance = _g.WorldType.CField(R.Name("World.Balance"), All).GetValue(null);
             _log("tutorial: supplies: the player carries " + SuppliesCarried() + ", capacity " + GetField(GetField(balance, R.Name("Skills.Balance")), R.Name("Balance.CarryCapacity")));
             Type t = R.Type("SupplyPickup");
             int count = SupplyTotal / SupplyPerPickup;
@@ -749,27 +749,27 @@ namespace EpidemicServer.Match
                 double angle = 2 * Math.PI * i / count;
                 ServerHooks.SetField(pickup, R.Name("Pickup.Position"), _g.Vector2(at[0] + (float)Math.Cos(angle) * SupplyDropRadius, at[1] + (float)Math.Sin(angle) * SupplyDropRadius));
                 ServerHooks.SetField(pickup, R.Name("SupplyPickup.Amount"), (byte)SupplyPerPickup);
-                _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { pickup, null, null });
+                _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { pickup, null, null });
                 last = pickup;
                 Pickups.Add(pickup);
             }
             _log("tutorial: dropped " + count + " supply pickups of " + SupplyPerPickup + " around the storage room (Mode.SupplyCount " +
-                 _g.ActiveMode.GetType().GetProperty(R.Name("Mode.SupplyCount"), All).GetValue(_g.ActiveMode, null) + ", pickup radius " + (last == null ? "?" : GetField(last, R.Name("Pickup.Radius")) + ", team " + GetField(last, R.Name("Pickup.Team")) + ", active " + last.GetType().GetProperty("IsActive", All).GetValue(last, null)) + ")");
+                 _g.ActiveMode.GetType().CProp(R.Name("Mode.SupplyCount"), All).GetValue(_g.ActiveMode, null) + ", pickup radius " + (last == null ? "?" : GetField(last, R.Name("Pickup.Radius")) + ", team " + GetField(last, R.Name("Pickup.Team")) + ", active " + last.GetType().CProp("IsActive", All).GetValue(last, null)) + ")");
         }
 
-        private object Supplies() { return _g.ActiveMode.GetType().GetProperty(R.Name("Mode.Supplies"), All).GetValue(_g.ActiveMode, null); }
+        private object Supplies() { return _g.ActiveMode.GetType().CProp(R.Name("Mode.Supplies"), All).GetValue(_g.ActiveMode, null); }
 
         public int SuppliesCarried()
         {
             object supplies = Supplies();
-            ushort index = (ushort)_player.GetType().GetProperty(R.Name("Entity.HeroIndex"), All).GetValue(_player, null);
-            return (int)supplies.GetType().GetMethod(R.Name("Supplies.Carried"), All).Invoke(supplies, new object[] { (int)index });
+            ushort index = (ushort)_player.GetType().CProp(R.Name("Entity.HeroIndex"), All).GetValue(_player, null);
+            return (int)supplies.GetType().CMethod(R.Name("Supplies.Carried"), All).Invoke(supplies, new object[] { (int)index });
         }
 
         public int SuppliesBanked()
         {
             object supplies = Supplies();
-            MethodInfo m = supplies.GetType().GetMethod(R.Name("Supplies.Delivered"), All);   // delivered so far
+            MethodInfo m = supplies.GetType().CMethod(R.Name("Supplies.Delivered"), All);   // delivered so far
             return (int)m.Invoke(supplies, new[] { Enum.Parse(m.GetParameters()[0].ParameterType, GameRuntime.PlayerTeam) });
         }
 
@@ -798,7 +798,7 @@ namespace EpidemicServer.Match
         private object SpawnTutorialNpc(string type, float x, float y, string team)
         {
             object npc = _g.SpawnNpc(type, x, y, team, _enemyAt == null ? null : new[] { _enemyAt[2], _enemyAt[3] });
-            R.Type("Tutorial.NpcBase").GetMethod(R.Name("Tutorial.NpcBase.SetupMovement"), All, null, Type.EmptyTypes, null).Invoke(npc, null);
+            R.Type("Tutorial.NpcBase").CMethod(R.Name("Tutorial.NpcBase.SetupMovement"), All, null, Type.EmptyTypes, null).Invoke(npc, null);
             ServerHooks.SetField(npc, R.Name("Npc.Accel"), ServerHooks.GetFieldValue(npc, R.Name("Zombie.Base.Acceleration")));
             ServerHooks.SetField(npc, R.Name("Npc.Drag"), ServerHooks.GetFieldValue(npc, R.Name("Zombie.Base.Friction")));
             return npc;
@@ -823,9 +823,9 @@ namespace EpidemicServer.Match
                     object t = _g.TakeFromPool(R.Type("Type.Driver"));
                     ServerHooks.SetField(t, "Position", _g.Vector2(at[0], at[1]));
                     ServerHooks.SetField(t, "Direction", _g.Vector2(at[2], at[3]));
-                    PropertyInfo team = t.GetType().GetProperty(R.Name("Entity.Team"), All);
+                    PropertyInfo team = t.GetType().CProp(R.Name("Entity.Team"), All);
                     team.SetValue(t, Enum.Parse(team.PropertyType, GameRuntime.PlayerTeam), null);
-                    _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { t, null, null });
+                    _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { t, null, null });
                     Truckers.Add(t);
                 }
                 catch (Exception e) { _log("tutorial: trucker spawn failed: " + GameRuntime.Unwrap(e).ToString().Split((char)10).Take(4).Aggregate((x, y) => x + " | " + y)); }
@@ -839,7 +839,7 @@ namespace EpidemicServer.Match
         {
             for (Type t = o.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(name, All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(name, All | BindingFlags.DeclaredOnly);
                 if (f != null) { f.SetValue(o, Enum.Parse(f.FieldType, enumValue)); return; }
             }
         }
@@ -848,15 +848,15 @@ namespace EpidemicServer.Match
 
         public static string Abilities(object npc)
         {
-            object bar = npc.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(npc, null);
-            Array slots = bar == null ? null : (Array)bar.GetType().GetProperty(R.Name("Bar.Slots"), All).GetValue(bar, null);
+            object bar = npc.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(npc, null);
+            Array slots = bar == null ? null : (Array)bar.GetType().CProp(R.Name("Bar.Slots"), All).GetValue(bar, null);
             return slots == null ? "-" : string.Join(", ", slots.Cast<object>().Where(x => x != null)
-                .Select(x => x.GetType().GetProperty(R.Name("Ability.Key"), All).GetValue(x, null).ToString()).ToArray());
+                .Select(x => x.GetType().CProp(R.Name("Ability.Key"), All).GetValue(x, null).ToString()).ToArray());
         }
 
         public static string Buffs(object character)
         {
-            IEnumerable list = (IEnumerable)character.GetType().GetProperty(R.Name("Entity.EffectList"), All).GetValue(character, null);
+            IEnumerable list = (IEnumerable)character.GetType().CProp(R.Name("Entity.EffectList"), All).GetValue(character, null);
             return list == null ? "" : string.Join(", ", list.Cast<object>().Where(x => x != null).Select(x => x.GetType().Name).ToArray());
         }
 
@@ -881,7 +881,7 @@ namespace EpidemicServer.Match
             {
                 _g.SetTutorialField(HintDash, 2);
                 GiveShotgun();
-                Companion.GetType().GetProperty(R.Name("Fighter.Master"), All).SetValue(Companion, _player, null);
+                Companion.GetType().CProp(R.Name("Fighter.Master"), All).SetValue(Companion, _player, null);
                 ServerHooks.SetField(Companion, R.Name("Npc.Accel"), ServerHooks.GetFieldValue(Companion, R.Name("Zombie.Base.Acceleration")));
                 _log("tutorial: Companion is the player's companion");
             }
@@ -921,7 +921,7 @@ namespace EpidemicServer.Match
                 // alpha every frame unless ActiveMode.IsCompleted is set (it is synced in
                 // ActiveMode.Serialize). With it unset, the stage-24 fade to black never shows and
                 // the tutorial mode's quit (fader alpha 1, then 5 s, shut down application) never runs.
-                _g.ActiveMode.GetType().GetProperty("IsCompleted", All).SetValue(_g.ActiveMode, true, null);
+                _g.ActiveMode.GetType().CProp("IsCompleted", All).SetValue(_g.ActiveMode, true, null);
                 _log("tutorial: game mode IsCompleted = true, so the client's stage-24 fade to black and quit can run");
                 if (OnCompleted != null) OnCompleted();
             }
@@ -940,7 +940,7 @@ namespace EpidemicServer.Match
             // Pickups are not entities: their position is the pickup base's own field #B
             // (the pickup base's position, radius and team fields; from the client's types).
             ServerHooks.SetField(paddle, R.Name("Pickup.Position"), _g.Vector2(_paddleAt[0], _paddleAt[1]));
-            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { paddle, null, null });
+            _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { paddle, null, null });
             _paddle = paddle;
             _log("tutorial: paddle pickup " + ServerHooks.Describe(paddle) + " at (" + _paddleAt[0] + ", " + _paddleAt[1] + "), radius " +
                  GetField(paddle, R.Name("Pickup.Radius")) + ", team " + GetField(paddle, R.Name("Pickup.Team")) + ", synchronizable " + _g.SynchronizableIndex(paddle));
@@ -956,16 +956,16 @@ namespace EpidemicServer.Match
         /// <summary>Gives the paddle as the game does (Tutorial.Equip slot 0, schematic 1005) and tells the client.</summary>
         private void GivePaddle()
         {
-            _player.GetType().GetField(R.Name("Tutorial.GotWeapon"), All).SetValue(_player, true);
-            _player.GetType().GetMethod(R.Name("Tutorial.Equip"), All).Invoke(_player, new object[] { 0, PaddleSchematic, true });
+            _player.GetType().CField(R.Name("Tutorial.GotWeapon"), All).SetValue(_player, true);
+            _player.GetType().CMethod(R.Name("Tutorial.Equip"), All).Invoke(_player, new object[] { 0, PaddleSchematic, true });
             SendClientInfo();
         }
 
         /// <summary>The shotgun in slot 1, not equipped (as the original server gave it).</summary>
         private void GiveShotgun()
         {
-            _player.GetType().GetField(R.Name("Tutorial.GotGun"), All).SetValue(_player, true);
-            _player.GetType().GetMethod(R.Name("Tutorial.Equip"), All).Invoke(_player, new object[] { 1, ShotgunSchematic, false });
+            _player.GetType().CField(R.Name("Tutorial.GotGun"), All).SetValue(_player, true);
+            _player.GetType().CMethod(R.Name("Tutorial.Equip"), All).Invoke(_player, new object[] { 1, ShotgunSchematic, false });
             _log("tutorial: the player received the shotgun");
             SendClientInfo();
         }
@@ -979,9 +979,9 @@ namespace EpidemicServer.Match
             m.Write((byte)0);
             m.Write((byte)7);
             m.Write((byte)0);
-            ServerHooks.Client0.GetType().GetMethod(R.Name("Net.WriteClientInfo"), All).Invoke(ServerHooks.Client0, new[] { m.Buffer, (object)true });
+            ServerHooks.Client0.GetType().CMethod(R.Name("Net.WriteClientInfo"), All).Invoke(ServerHooks.Client0, new[] { m.Buffer, (object)true });
             ServerHooks.QueueReliable(m.Buffer);
-            object client = _player.GetType().GetProperty("Client", All).GetValue(_player, null);
+            object client = _player.GetType().CProp("Client", All).GetValue(_player, null);
             object cid = ServerHooks.GetFieldValue(ServerHooks.Client0, R.Name("Net.ClientCard"));
             Func<string, string> uq = f => { object u = ServerHooks.GetFieldValue(cid, f); return ServerHooks.GetFieldValue(u, R.Name("Craft.Blueprint")) + (ServerHooks.GetFieldValue(u, "Guid") == null ? "" : " (guid)"); };
             _log("tutorial: sent client info (" + m.ToBytes().Length + " bytes, player client is Client0: " + ReferenceEquals(client, ServerHooks.Client0) + ", melee " + uq(R.Name("Client.Melee")) + ", ranged " + uq(R.Name("Client.Ranged")) + ", changed " + ServerHooks.GetFieldValue(cid, R.Name("Client.Gadget3")) + "): " + BitConverter.ToString(m.ToBytes()));
@@ -996,7 +996,7 @@ namespace EpidemicServer.Match
         /// </summary>
         private void Respawn(float time)
         {
-            bool dead = (bool)_player.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(_player, null);
+            bool dead = (bool)_player.GetType().CProp(R.Name("Entity.Dead"), All).GetValue(_player, null);
             if (!dead)
             {
                 _diedAt = -1f;
@@ -1013,15 +1013,15 @@ namespace EpidemicServer.Match
             if (time - _diedAt < RespawnSeconds) return;
             float[] back = TrailPoint(_diedAt - RespawnLookback);
             object at = back == null ? _g.Vector2(_spawn.X, _spawn.Y) : _g.Vector2(back[0], back[1]);
-            _player.GetType().GetField(R.Name("Map.Position"), All).SetValue(_player, at);
+            _player.GetType().CField(R.Name("Map.Position"), All).SetValue(_player, at);
             // Teleport, not a bare Position write: collision would pull her back to her last free position.
-            R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(_player, new object[] { at, true });
-            _player.GetType().GetMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(_player, null);
+            R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(_player, new object[] { at, true });
+            _player.GetType().CMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(_player, null);
             _diedAt = -1f;
             _log("tutorial: the player respawned " + (back == null ? "at the spawn point" : "at (" + back[0].ToString("0") + ", " + back[1].ToString("0") + "), where she was " + RespawnLookback + " s before dying") + ", Health " + ServerHooks.GetStat(_player, R.Name("Stat.Health")) + "/" + ServerHooks.GetStat(_player, R.Name("Stat.HealthMax")) +
-                 ", dead " + _player.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(_player, null));
-            if ((bool)_player.GetType().GetField(R.Name("Tutorial.GotWeapon"), All).GetValue(_player)) GivePaddle();
-            if ((bool)_player.GetType().GetField(R.Name("Tutorial.GotGun"), All).GetValue(_player)) GiveShotgun();
+                 ", dead " + _player.GetType().CProp(R.Name("Entity.Dead"), All).GetValue(_player, null));
+            if ((bool)_player.GetType().CField(R.Name("Tutorial.GotWeapon"), All).GetValue(_player)) GivePaddle();
+            if ((bool)_player.GetType().CField(R.Name("Tutorial.GotGun"), All).GetValue(_player)) GiveShotgun();
         }
 
         // ---- helpers ----
@@ -1036,14 +1036,14 @@ namespace EpidemicServer.Match
 
         private object PlayerTeamId()
         {
-            return _player.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(_player, null);
+            return _player.GetType().CProp(R.Name("Entity.Team"), All).GetValue(_player, null);
         }
 
         private static object GetField(object o, string name)
         {
             for (Type t = o.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(name, All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(name, All | BindingFlags.DeclaredOnly);
                 if (f != null) return f.GetValue(o);
             }
             return null;
@@ -1051,7 +1051,7 @@ namespace EpidemicServer.Match
 
         private static bool Destroyed(object o)
         {
-            return (bool)o.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(o, null) || !(bool)o.GetType().GetProperty("IsActive", All).GetValue(o, null);
+            return (bool)o.GetType().CProp(R.Name("Entity.Dead"), All).GetValue(o, null) || !(bool)o.GetType().CProp("IsActive", All).GetValue(o, null);
         }
 
         private static float Distance(float[] a, float x, float y)

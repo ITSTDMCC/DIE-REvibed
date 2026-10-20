@@ -120,7 +120,7 @@ namespace EpidemicServer.Match
             _player = player;
             _log = log;
             _mode = g.ActiveMode;
-            _state = _mode.GetType().GetField(R.Name("HordeRules.State"), All);
+            _state = _mode.GetType().CField(R.Name("HordeRules.State"), All);
             Map = g.MapIndex;
             Heroic = g.Difficulty == 2;
             // Per map, from the pool table (type names from WorldObject.Is*): the hoarder is
@@ -135,7 +135,7 @@ namespace EpidemicServer.Match
 
         // ---- world ----
 
-        public void PopulateWorld()
+        public void PopulateWorld(IList<string> botHeroes, int level, Weapon melee, Weapon ranged, SpawnPoint spawn)
         {
             var statics = new List<object[]>();
             foreach (object o in _g.MapThings())
@@ -187,7 +187,7 @@ namespace EpidemicServer.Match
             }
             // Supply points sit where the client's own supply-point objects (HordeSupplyPoint, made by load game mode
             // at get trigger position(ID)) are: the capture channel and range use that spot.
-            foreach (object o in (System.Collections.IEnumerable)_mode.GetType().GetProperty(R.Name("Map.Objects"), All).GetValue(_mode, null))
+            foreach (object o in (System.Collections.IEnumerable)_mode.GetType().CProp(R.Name("Map.Objects"), All).GetValue(_mode, null))
             {
                 if (o.GetType().Name != R.Short("HordeSupplyPoint")) continue;
                 Point pt = _points.FirstOrDefault(x => x.Id == Convert.ToInt32(ServerHooks.GetFieldValue(o, R.Name("MapPoint.Id"))));
@@ -227,6 +227,7 @@ namespace EpidemicServer.Match
             }
             ServerHooks.OnKill = OnKill;
             ServerHooks.OnGameMessage = OnGameMessage;
+            AddBots(botHeroes, level, melee, ranged, spawn);
             _log("horde: map " + Map + " (" + _g.MapName + "), difficulty " + ServerHooks.GetFieldValue(_g.World, R.Name("World.Difficulty")) + "; supply points " +
                  string.Join(", ", _points.Select(p => p.Slot + ": ID " + p.Id + " at " + Fmt(p.At) + " range " + p.CaptureReach + " radius " + p.Radius + ", " +
                                                       p.Blockages.Count + " blockages, " + p.Spots.Count + " wave spots").ToArray()) +
@@ -238,8 +239,8 @@ namespace EpidemicServer.Match
         {
             Type t = R.Type("Type.WaveSpawner");
             object s = _g.TakeFromPool(t);
-            t.GetField("ID", All).SetValue(s, (ushort)id);
-            _g.WorldType.GetMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { s, null, null });
+            t.CField("ID", All).SetValue(s, (ushort)id);
+            _g.WorldType.CMethod(R.Name("World.SpawnObject"), All).Invoke(_g.World, new object[] { s, null, null });
             _log("horde: WaveSpawner " + id + " spawned, synchronizable " + _g.SynchronizableIndex(s));
             return s;
         }
@@ -254,7 +255,7 @@ namespace EpidemicServer.Match
                 object z = _g.SpawnNpc(type, p[0], p[1], GameRuntime.ZombieTeam, d);
                 if (state != null)
                 {
-                    PropertyInfo ss = z.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
+                    PropertyInfo ss = z.GetType().CProp(R.Name("Npc.PoseNow"), All);
                     ss.SetValue(z, Enum.ToObject(ss.PropertyType, Convert.ToInt32(state)), null);
                 }
                 Zombies.Add(z);
@@ -272,12 +273,96 @@ namespace EpidemicServer.Match
             }
         }
 
+        // ---- bot teammates (ours; the original Horde had none) ----
+
+        /// <summary>A bot fights zombies this close to itself or to the human; otherwise it follows the human (ours).</summary>
+        public const float BotEngageRange = 70f, BotGuardRange = 60f, BotFollowDistance = 30f, BotRespawnSeconds = 8f;
+        public readonly List<Bot> Bots = new List<Bot>();
+        private readonly Dictionary<object, float> _botDiedAt = new Dictionary<object, float>();
+
+        /// <summary>
+        /// The human's teammates: bot heroes on the human's team, starting at the human's spawn, with the human's
+        /// weapon types and level (as Scavenger's bots). Zombies then go for the nearest living hero, bots included.
+        /// </summary>
+        private void AddBots(IList<string> botHeroes, int level, Weapon melee, Weapon ranged, SpawnPoint spawn)
+        {
+            if (botHeroes == null || botHeroes.Count == 0) return;
+            string team = _player.GetType().CProp(R.Name("Entity.Team"), All).GetValue(_player, null).ToString();
+            for (int i = 0; i < botHeroes.Count; i++)
+            {
+                int slot = i + 1;
+                Weapon bm = melee == null ? null : new Weapon { Guid = Guid.NewGuid().ToByteArray(), SchematicId = melee.SchematicId, UserId = 0x7FFF0000UL + (ulong)slot };
+                Weapon br = ranged == null ? null : new Weapon { Guid = Guid.NewGuid().ToByteArray(), SchematicId = ranged.SchematicId, UserId = 0x7FFF0000UL + (ulong)slot };
+                try { Bots.Add(BotDriver.Create(_g, slot, botHeroes[i], team, botHeroes[i], spawn, level, bm, br)); }
+                catch (Exception e) { _log("horde: bot " + botHeroes[i] + " failed: " + GameRuntime.Unwrap(e).Message); }
+            }
+            BotDriver.Graph = null;   // Horde maps have no waypoint network; bots use the navmesh
+            BotDriver.Log = _log;
+            ServerHooks.ChooseTarget = (npc, human) => ServerHooks.NearestTarget(npc, Heroes());
+            _log("horde: bot teammates " + string.Join(", ", Bots.Select(b => b.Name).ToArray()) + " on " + team);
+        }
+
+        private IEnumerable<object> Heroes()
+        {
+            yield return _player;
+            foreach (Bot b in Bots) yield return b.Player;
+        }
+
+        private void DriveBots(float time)
+        {
+            if (Bots.Count == 0) return;
+            float[] human = ServerHooks.Position(_player);
+            bool humanUp = !IsDead(_player);
+            foreach (Bot b in Bots)
+            {
+                try
+                {
+                    if (RespawnBot(b, time, human)) continue;
+                    float[] me = ServerHooks.Position(b.Player);
+                    // Fight the zombie nearest to this bot within BotEngageRange, or one going for the human within BotGuardRange.
+                    object target = null;
+                    float best = float.MaxValue;
+                    foreach (object z in Zombies)
+                    {
+                        if (BotDriver.Gone(z)) continue;
+                        float[] zp = ServerHooks.Position(z);
+                        float d = Distance(zp, me);
+                        if (d > BotEngageRange && !(humanUp && Distance(zp, human) <= BotGuardRange)) continue;
+                        if (d < best) { best = d; target = z; }
+                    }
+                    b.Target = target;
+                    b.Goal = target == null && Distance(me, human) > BotFollowDistance ? human : null;
+                    BotDriver.Drive(_g, b, time);
+                }
+                catch (Exception e) { _log("horde: bot " + b.Name + " failed: " + GameRuntime.Unwrap(e).Message); }
+            }
+        }
+
+        /// <summary>A dead bot comes back next to the human after BotRespawnSeconds (ours). True while it is dead.</summary>
+        private bool RespawnBot(Bot b, float time, float[] human)
+        {
+            object p = b.Player;
+            if (!IsDead(p)) { _botDiedAt.Remove(p); return false; }
+            float at;
+            if (!_botDiedAt.TryGetValue(p, out at)) { _botDiedAt[p] = time; return true; }
+            if (time - at < BotRespawnSeconds) return true;
+            object v = _g.Vector2(human[0] + 8f * b.ClientIndex, human[1]);
+            p.GetType().CField(R.Name("Map.Position"), All).SetValue(p, v);
+            R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(p, new object[] { v, true });
+            p.GetType().CMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(p, null);
+            _botDiedAt.Remove(p);
+            b.RespawnedAt = time;
+            b.Path = null;
+            _log("horde: bot " + b.Name + " respawned next to the player");
+            return true;
+        }
+
         // ---- the HUD struct (WaveRules.State) ----
 
         private void Set(string field, object value)
         {
             object s = _state.GetValue(_mode);   // a boxed copy of the struct
-            FieldInfo f = s.GetType().GetField(field, All);
+            FieldInfo f = s.GetType().CField(field, All);
             f.SetValue(s, value);
             _state.SetValue(_mode, s);
         }
@@ -285,10 +370,10 @@ namespace EpidemicServer.Match
         private int Get(string field)
         {
             object s = _state.GetValue(_mode);
-            return Convert.ToInt32(s.GetType().GetField(field, All).GetValue(s));
+            return Convert.ToInt32(s.GetType().CField(field, All).GetValue(s));
         }
 
-        private float MatchLength { get { return (float)R.Type("Type.Mode").GetField("MatchLength", All).GetValue(_mode); } }
+        private float MatchLength { get { return (float)R.Type("Type.Mode").CField("MatchLength", All).GetValue(_mode); } }
 
         // ---- steps ----
 
@@ -297,6 +382,7 @@ namespace EpidemicServer.Match
             _time = time;
             Respawn(time);
             if (_won) return;
+            DriveBots(time);
             if (!_started)
             {
                 _started = true;
@@ -310,13 +396,13 @@ namespace EpidemicServer.Match
             foreach (Point pt in _points)
             {
                 if (pt.State != 0) continue;
-                ushort capture = Convert.ToUInt16(pt.Spawner.GetType().GetProperty(R.Name("Room.State"), All).GetValue(pt.Spawner, null));
+                ushort capture = Convert.ToUInt16(pt.Spawner.GetType().CProp(R.Name("Room.State"), All).GetValue(pt.Spawner, null));
                 if (capture == 1) { Captured(pt, "the capture channel finished"); continue; }
                 if (_active != null || dead || Distance(a, pt.At) > pt.CaptureReach) { pt.InRangeSince = -1f; continue; }
                 if (pt.InRangeSince < 0f) pt.InRangeSince = time;
                 else if (time - pt.InRangeSince >= FallbackCaptureSeconds)
                 {
-                    pt.Spawner.GetType().GetMethod(R.Name("Room.BeginCapture"), All).Invoke(pt.Spawner, null);
+                    pt.Spawner.GetType().CMethod(R.Name("Room.BeginCapture"), All).Invoke(pt.Spawner, null);
                     Captured(pt, "fallback: the player stood in range " + FallbackCaptureSeconds + " s without a capture reaching the server");
                 }
             }
@@ -338,7 +424,7 @@ namespace EpidemicServer.Match
             pt.Hoarder = _secured == _points.Count - 1;   // stand-in: the last point secured ends with the hoarder
             _active = pt;
             int spawned = 0;
-            MethodInfo block = pt.Spawner.GetType().GetMethod(R.Name("Wave.Block"), All);
+            MethodInfo block = pt.Spawner.GetType().CMethod(R.Name("Wave.Block"), All);
             ParameterInfo[] ps = block.GetParameters();
             foreach (object o in pt.Blockages)
             {
@@ -462,7 +548,7 @@ namespace EpidemicServer.Match
                 double ang = _random.NextDouble() * Math.PI * 2;
                 float r = Math.Min(30f, pt.Radius * 0.4f);
                 float[] to = { pt.At[0] + (float)Math.Cos(ang) * r, pt.At[1] + (float)Math.Sin(ang) * r };
-                R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(z, new object[] { _g.Vector2(to[0], to[1]), true });
+                R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(z, new object[] { _g.Vector2(to[0], to[1]), true });
                 _moved[z] = new[] { to[0], to[1], time };
                 _log("horde: " + ServerHooks.Describe(z) + " stuck at " + Fmt(p) + " for " + StuckSeconds + " s; moved to " + Fmt(to));
             }
@@ -501,7 +587,7 @@ namespace EpidemicServer.Match
                         try { if (ServerHooks.LineClear(a, c)) to = c; } catch (Exception) { }
                     }
                 if (to == null) to = new[] { a[0] + 8f, a[1] };
-                R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(z, new object[] { _g.Vector2(to[0], to[1]), true });
+                R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(z, new object[] { _g.Vector2(to[0], to[1]), true });
                 _moved[z] = new[] { to[0], to[1], time };
                 if (_chaseLogged++ < 20) _log("horde: " + ServerHooks.Describe(z) + " could not reach the player from " + Fmt(p) + " for " + StuckSeconds + " s; moved to " + Fmt(to));
             }
@@ -548,7 +634,7 @@ namespace EpidemicServer.Match
             pt.State = 2;
             _active = null;
             _secured++;
-            pt.Spawner.GetType().GetMethod(R.Name("Room.Captured"), All).Invoke(pt.Spawner, null);   // state 2, blockages down
+            pt.Spawner.GetType().CMethod(R.Name("Room.Captured"), All).Invoke(pt.Spawner, null);   // state 2, blockages down
             Set(pt.Slot == 1 ? R.Name("HordeState.Point1") : R.Name("HordeState.Point2"), 2);
             Set(R.Name("HordeState.ZombiesLeft"), 0);
             Set(R.Name("HordeState.WaveSize"), 0);
@@ -603,8 +689,8 @@ namespace EpidemicServer.Match
 
         private void OnKill(object victim, object killer)
         {
-            if (victim == _player || _won) return;
-            int add = victim == _hoarder ? HoarderSupplies : IsWalker(victim) ? WalkerSupplies : SpecialSupplies;
+            if (victim == _player || _won || Bots.Any(b => b.Player == victim)) return;
+            int add =victim == _hoarder ? HoarderSupplies : IsWalker(victim) ? WalkerSupplies : SpecialSupplies;
             Supplies += add;
             Set(R.Name("HordeState.Supplies"), Supplies);
             if (victim == _hoarder)
@@ -668,14 +754,14 @@ namespace EpidemicServer.Match
             if (_active != null) at = _active.At;
             else
             {
-                at = ServerHooks.Vector(_mode.GetType().GetMethod(R.Name("World.SpawnAt"), All).Invoke(_mode, new[] { _player.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(_player, null) }));
-                if (at[0] == 0f && at[1] == 0f) at = ServerHooks.Vector(_player.GetType().GetField(R.Name("Map.Position"), All).GetValue(_player));
+                at = ServerHooks.Vector(_mode.GetType().CMethod(R.Name("World.SpawnAt"), All).Invoke(_mode, new[] { _player.GetType().CProp(R.Name("Entity.Team"), All).GetValue(_player, null) }));
+                if (at[0] == 0f && at[1] == 0f) at = ServerHooks.Vector(_player.GetType().CField(R.Name("Map.Position"), All).GetValue(_player));
             }
             object v = _g.Vector2(at[0], at[1]);
-            _player.GetType().GetField(R.Name("Map.Position"), All).SetValue(_player, v);
-            R.Type("Type.Entity").GetMethod(R.Name("Entity.MoveTo"), All).Invoke(_player, new object[] { v, true });
-            _player.GetType().GetMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(_player, null);
-            _log("horde: the player respawned at " + Fmt(at) + (_active != null ? " (supply point " + _active.Slot + ")" : " (checkpoint " + _mode.GetType().GetProperty(R.Name("Npc.SpawnTag"), All).GetValue(_mode, null) + ")") +
+            _player.GetType().CField(R.Name("Map.Position"), All).SetValue(_player, v);
+            R.Type("Type.Entity").CMethod(R.Name("Entity.MoveTo"), All).Invoke(_player, new object[] { v, true });
+            _player.GetType().CMethod(R.Name("Entity.Revive"), All, null, Type.EmptyTypes, null).Invoke(_player, null);
+            _log("horde: the player respawned at " + Fmt(at) + (_active != null ? " (supply point " + _active.Slot + ")" : " (checkpoint " + _mode.GetType().CProp(R.Name("Npc.SpawnTag"), All).GetValue(_mode, null) + ")") +
                  (_respawnAsked ? "" : " after " + AutoRespawnSeconds + " s without a respawn request") + ", Health " + ServerHooks.GetStat(_player, R.Name("Stat.Health")));
             _diedAt = -1f;
             _respawnAsked = false;
@@ -684,7 +770,7 @@ namespace EpidemicServer.Match
 
         private void Despawn(object z)
         {
-            try { z.GetType().GetMethod("Destroy", All, null, Type.EmptyTypes, null).Invoke(z, null); }
+            try { z.GetType().CMethod("Destroy", All, null, Type.EmptyTypes, null).Invoke(z, null); }
             catch (Exception e) { _log("horde: removing " + ServerHooks.Describe(z) + " failed: " + GameRuntime.Unwrap(e).Message); }
         }
 
@@ -694,7 +780,7 @@ namespace EpidemicServer.Match
         private void Win()
         {
             float length = MatchLength;
-            float gold = (float)_mode.GetType().GetField(R.Name("HordeRules.GoldLimit"), All).GetValue(_mode), silver = (float)_mode.GetType().GetField(R.Name("HordeRules.SilverLimit"), All).GetValue(_mode);
+            float gold = (float)_mode.GetType().CField(R.Name("HordeRules.GoldLimit"), All).GetValue(_mode), silver = (float)_mode.GetType().CField(R.Name("HordeRules.SilverLimit"), All).GetValue(_mode);
             int placement = length <= gold ? First : length <= silver ? Second : Third;
             Finish(placement, "the boss died at match time " + length.ToString("0") + " s (gold within " + gold + ", silver within " + silver + ")");
         }
@@ -703,9 +789,9 @@ namespace EpidemicServer.Match
         {
             _won = true;
             Set(R.Name("HordeState.BossActive"), false);
-            _mode.GetType().GetProperty("IsCompleted", All).SetValue(_mode, true, null);
+            _mode.GetType().CProp("IsCompleted", All).SetValue(_mode, true, null);
             ServerHooks.SyncNow = true;   // IsCompleted in the same frame as team finished
-            int team = Convert.ToInt32(_player.GetType().GetProperty(R.Name("Entity.Team"), All).GetValue(_player, null));
+            int team = Convert.ToInt32(_player.GetType().CProp(R.Name("Entity.Team"), All).GetValue(_player, null));
             ServerHooks.SendMatchMessage(TeamFinishedMessage, m => { m.WriteBits((uint)team, 3); m.WriteBits((uint)placement, 3); m.Write(true); });
             // Boxes (CC/RewardTables): mission + time box, plus the Gold or Silver medal box; conceded gets the time box only.
             int mission = Heroic ? HordeHardGoalBox : HordeNormalGoalBox, timeBox = Heroic ? HordeHardClockBox : HordeNormalClockBox;
@@ -720,11 +806,11 @@ namespace EpidemicServer.Match
 
         // ---- helpers ----
 
-        private static bool IsDead(object o) { return (bool)o.GetType().GetProperty(R.Name("Entity.Dead"), All).GetValue(o, null); }
+        private static bool IsDead(object o) { return (bool)o.GetType().CProp(R.Name("Entity.Dead"), All).GetValue(o, null); }
 
         private static bool Destroyed(object o)
         {
-            return o == null || IsDead(o) || !(bool)o.GetType().GetProperty("IsActive", All).GetValue(o, null);
+            return o == null || IsDead(o) || !(bool)o.GetType().CProp("IsActive", All).GetValue(o, null);
         }
 
         private static float Distance(float[] a, float[] b)

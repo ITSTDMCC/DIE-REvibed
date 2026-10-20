@@ -20,7 +20,7 @@ namespace EpidemicServer.Match
         {
             b.Write(true);
             b.Write(true);
-            client0.GetType().GetMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(client0, new[] { b.Buffer, (object)true });
+            client0.GetType().CMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(client0, new[] { b.Buffer, (object)true });
             for (int slot = 1; slot < ControllerSlots; slot++)
             {
                 // Bot slots: their controller as a remote client's (not local), so the human sees their aim and moves.
@@ -28,7 +28,7 @@ namespace EpidemicServer.Match
                 {
                     object c = game.GetClient(slot);
                     b.Write(true);
-                    c.GetType().GetMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(c, new[] { b.Buffer, (object)false });
+                    c.GetType().CMethod(R.Name("Net.WriteInput"), GameRuntime.All).Invoke(c, new[] { b.Buffer, (object)false });
                 }
                 else b.Write(false);
             }
@@ -54,7 +54,7 @@ namespace EpidemicServer.Match
             foreach (object item in items)
             {
                 b.WriteRanged(0, n, game.SynchronizableIndex(item));
-                item.GetType().GetMethod("Serialize", GameRuntime.All, null,
+                item.GetType().CMethod("Serialize", GameRuntime.All, null,
                     new[] { R.Type("Type.NetBufferApi"), R.Type("Type.Peer") }, null)
                     .Invoke(item, new[] { b.Buffer, viewer });
             }

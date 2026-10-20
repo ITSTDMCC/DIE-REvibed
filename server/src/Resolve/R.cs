@@ -34,6 +34,7 @@ namespace EpidemicServer.Resolve
                 _names = new NameIndex(list);
                 Types.Clear();
                 Members.Clear();
+                NameCache.Clear();
             }
         }
 
@@ -90,15 +91,22 @@ namespace EpidemicServer.Resolve
         /// <summary>The name to use with reflection: a type's full name, a member's name, or a readable name.</summary>
         public static string Name(string role)
         {
+            // The match code asks for the same names on every tick; resolved names never change after Init.
+            string cached;
+            lock (Gate) { if (NameCache.TryGetValue(role, out cached)) return cached; }
             string fp = Print(role);
+            string name;
             if (fp.StartsWith("N|"))
             {
-                string n = Names().Name(fp);
-                if (n == null) throw new Exception("game name for role '" + role + "' not found in the installed game");
-                return n;
+                name = Names().Name(fp);
+                if (name == null) throw new Exception("game name for role '" + role + "' not found in the installed game");
             }
-            return fp.StartsWith("T|") ? Type(role).FullName : Member(role).Name;
+            else name = fp.StartsWith("T|") ? Type(role).FullName : Member(role).Name;
+            lock (Gate) { NameCache[role] = name; }
+            return name;
         }
+
+        private static readonly Dictionary<string, string> NameCache = new Dictionary<string, string>();
 
         /// <summary>A type role's short name (Type.Name), for comparing against an object's runtime type.</summary>
         public static string Short(string role)

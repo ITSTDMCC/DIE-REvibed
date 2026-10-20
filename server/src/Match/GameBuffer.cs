@@ -33,8 +33,8 @@ namespace EpidemicServer.Match
             Type factoryType = game.Game(R.Name("NetBufferFactory"));
             _factory = factoryType.GetConstructor(GameRuntime.All, null, new[] { typeof(bool), typeof(int) }, null)
                 .Invoke(new object[] { false, 4 });
-            _create = factoryType.GetMethod(R.Name("NetBufferFactory.Create"), GameRuntime.All);
-            _inputCreator = (Delegate)R.Type("Type.NetBuffer").GetField(R.Name("NetBuffer.InputCreator"), GameRuntime.All).GetValue(null);
+            _create = factoryType.CMethod(R.Name("NetBufferFactory.Create"), GameRuntime.All);
+            _inputCreator = (Delegate)R.Type("Type.NetBuffer").CField(R.Name("NetBuffer.InputCreator"), GameRuntime.All).GetValue(null);
         }
 
         /// <summary>An empty buffer for writing (the game's outgoing message type).</summary>
@@ -91,7 +91,7 @@ namespace EpidemicServer.Match
             if (!Methods.TryGetValue(key, out m))
             {
                 m = new[] { t }.Concat(t.GetInterfaces())
-                    .Select(x => x.GetMethod(name, GameRuntime.All, null, types, null))
+                    .Select(x => x.CMethod(name, GameRuntime.All, null, types, null))
                     .FirstOrDefault(x => x != null);
                 if (m == null) throw new MissingMethodException(t.FullName, key);
                 Methods[key] = m;

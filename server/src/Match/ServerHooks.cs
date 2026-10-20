@@ -258,12 +258,12 @@ namespace EpidemicServer.Match
                     // The buff came out of the game's pool (World.PooledEffect); hand it back, or the pool runs
                     // dry and every later knockback hit throws inside the game's hit code (2026-10-07 playtest: from
                     // about 6 minutes in, "No GameObject in pool" for that buff on each hit, zombies dying seconds late).
-                    try { _g.WorldType.GetMethod(R.Name("World.Recycle"), All).Invoke(_g.World, new[] { buff }); }
+                    try { _g.WorldType.CMethod(R.Name("World.Recycle"), All).Invoke(_g.World, new[] { buff }); }
                     catch (Exception e) { if (_poolReturnLogged++ < 3) Log("OnBuff: could not return " + Describe(buff) + " to the pool: " + GameRuntime.Unwrap(e).Message); }
                     return Enum.ToObject(R.Type("BuffResult"), 0);
                 }
             }
-            buff.GetType().GetProperty("Target", All).SetValue(buff, target, null);
+            buff.GetType().CProp("Target", All).SetValue(buff, target, null);
             if (owner != null) Method(buff, "SetOwner").Invoke(buff, new[] { owner });
             Method(target, R.Name("Entity.AddEffect")).Invoke(target, new[] { buff });
             try { Method(buff, R.Name("Entity.Appear"), Type.EmptyTypes).Invoke(buff, null); }
@@ -292,7 +292,7 @@ namespace EpidemicServer.Match
             {
                 // Spells spawn Neutral, and the hit test compares the spell's own team
                 // with the target's: give the spell its owner's team first.
-                PropertyInfo team = obj.GetType().GetProperty(R.Name("Entity.Team"), All);
+                PropertyInfo team = obj.GetType().CProp(R.Name("Entity.Team"), All);
                 team.SetValue(obj, team.GetValue(owner, null), null);
                 Method(obj, "SetOwner").Invoke(obj, new[] { owner });
             }
@@ -324,7 +324,7 @@ namespace EpidemicServer.Match
             {
                 _knockbackLogged = true;
                 Log("knockback: direction " + direction + ", priority " + priority + ", owner " + Describe(owner) +
-                    ", vector now " + vector.GetType().GetProperty("Value", All).GetValue(vector, null));
+                    ", vector now " + vector.GetType().CProp("Value", All).GetValue(vector, null));
             }
             return R.Type("StatEffectChangeWrap").GetConstructors(All).First(c => c.GetParameters().Length == 1).Invoke(new[] { change });
         }
@@ -359,7 +359,7 @@ namespace EpidemicServer.Match
 
         private static object SendSctToClient(object gm, object[] a)
         {
-            object sct = _g.WorldType.GetField(R.Name("Text.Sync"), All).GetValue(gm);
+            object sct = _g.WorldType.CField(R.Name("Text.Sync"), All).GetValue(gm);
             if (sct == null) return null;
             Method(sct, R.Name("Hook.FloatText")).Invoke(sct, a);
             if (!_sctLogged)
@@ -382,7 +382,7 @@ namespace EpidemicServer.Match
             try { mouse = ", mouse " + Prop(player, "MousePosition"); } catch (Exception) { }
             string nearest = "no NPC";
             float best = float.MaxValue;
-            foreach (object npc in (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(_g.World))
+            foreach (object npc in (Array)_g.WorldType.CField(R.Name("World.Npcs"), All).GetValue(_g.World))
             {
                 if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, R.Name("Entity.Dead"))) continue;
                 float[] n = Position(npc);
@@ -428,10 +428,10 @@ namespace EpidemicServer.Match
             if (QueueReliable == null) return null;
             int clientIndex = (int)Prop(client, "Index");
             ushort global = (ushort)Prop(obj, R.Name("Entity.GlobalIndex"));
-            object spawnDatas = gm.GetType().GetProperty(R.Name("World.SpawnTable"), All).GetValue(gm, null);
-            int spawnId = (int)spawnDatas.GetType().GetMethod(R.Name("SpawnData.NextSpawnId"), All, null, new[] { typeof(int), typeof(int) }, null)
+            object spawnDatas = gm.GetType().CProp(R.Name("World.SpawnTable"), All).GetValue(gm, null);
+            int spawnId = (int)spawnDatas.GetType().CMethod(R.Name("SpawnData.NextSpawnId"), All, null, new[] { typeof(int), typeof(int) }, null)
                 .Invoke(spawnDatas, new object[] { (int)global, clientIndex });
-            int objects = (int)gm.GetType().GetProperty(R.Name("World.ObjectCount"), All).GetValue(gm, null);
+            int objects = (int)gm.GetType().CProp(R.Name("World.ObjectCount"), All).GetValue(gm, null);
             GameBuffer m = GameBuffer.Create();
             m.Write((byte)1);
             m.Write((byte)0);
@@ -478,7 +478,7 @@ namespace EpidemicServer.Match
                 if (character.IsInstanceOfType(o)) return o;
                 PropertyInfo owner = null;
                 for (Type t = o.GetType(); t != null && owner == null; t = t.BaseType)
-                    owner = t.GetProperty("Owner", All | BindingFlags.DeclaredOnly);
+                    owner = t.CProp("Owner", All | BindingFlags.DeclaredOnly);
                 object next = owner == null ? null : owner.GetValue(o, null);
                 if (next == null || next == o) return o;
                 o = next;
@@ -524,10 +524,10 @@ namespace EpidemicServer.Match
         public static string AbilityName(object o)
         {
             if (o == null) return "-";
-            PropertyInfo p = o.GetType().GetProperty(R.Name("Spell.Ability"), All);
+            PropertyInfo p = o.GetType().CProp(R.Name("Spell.Ability"), All);
             object a = p == null ? null : p.GetValue(o, null);
             if (a == null) return "-";
-            PropertyInfo id = a.GetType().GetProperty(R.Name("Ability.Key"), All);
+            PropertyInfo id = a.GetType().CProp(R.Name("Ability.Key"), All);
             return id == null ? a.GetType().Name : id.GetValue(a, null).ToString();
         }
 
@@ -572,12 +572,12 @@ namespace EpidemicServer.Match
                 if ((f.FieldType == typeof(int) || f.FieldType == typeof(bool) || f.FieldType.IsEnum) && !FrameCounters.Contains(f.Name))
                     parts.Add(f.Name + "=" + f.GetValue(data));
             // A self-cast press (rising edge): what the player's X presses at the supply point arrive as.
-            FieldInfo selfCast = data.GetType().GetField(R.Name("ControllerData.CastOnSelf"), All);
+            FieldInfo selfCast = data.GetType().CField(R.Name("ControllerData.CastOnSelf"), All);
             bool sc = selfCast != null && (bool)selfCast.GetValue(data);
             if (sc && !_lastSelfCast && SelfCastPressed != null) SelfCastPressed();
             _lastSelfCast = sc;
             // Name each new ability press (the pressed value is an index into the bar's cached abilities).
-            FieldInfo pressed = data.GetType().GetField(R.Name("ControllerData.Pressed"), All), counter = data.GetType().GetField(R.Name("ControllerData.PressCounter"), All);
+            FieldInfo pressed = data.GetType().CField(R.Name("ControllerData.Pressed"), All), counter = data.GetType().CField(R.Name("ControllerData.PressCounter"), All);
             if (pressed != null && counter != null)
             {
                 int index = (int)pressed.GetValue(data), count = (int)counter.GetValue(data);
@@ -590,7 +590,7 @@ namespace EpidemicServer.Match
                         object bar = Prop(player, R.Name("Fighter.Bar"));
                         object ability = bar.GetType().GetMethods(All).First(m => m.Name == R.Name("Bar.Cached") && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType == typeof(int)).Invoke(bar, new object[] { index });
                         if (ability == null || !new[] { R.Name("Ability.HeavyFirst"), R.Name("Ability.HeavySecond"), R.Name("Ability.LightFirst"), R.Name("Ability.GunFirst"), "Dash" }.Contains(Prop(ability, R.Name("Ability.Key")).ToString()))
-                            Log("ability press: cached " + index + " = " + (ability == null ? "(none)" : Prop(ability, R.Name("Ability.Key")) + " in slot " + ability.GetType().GetField(R.Name("Bar.Slot"), All).GetValue(ability)) +
+                            Log("ability press: cached " + index + " = " + (ability == null ? "(none)" : Prop(ability, R.Name("Ability.Key")) + " in slot " + ability.GetType().CField(R.Name("Bar.Slot"), All).GetValue(ability)) +
                                 ", player at (" + string.Join(", ", Position(player).Select(v => v.ToString("0")).ToArray()) + ")" + (PressNote == null ? "" : ", " + PressNote()));
                     }
                     catch (Exception e) { Log("ability press: cached " + index + " (" + GameRuntime.Unwrap(e).Message + ")"); }
@@ -626,11 +626,11 @@ namespace EpidemicServer.Match
         {
             float until;
             if (WakeUntil.TryGetValue(npc, out until)) return _time >= until;
-            PropertyInfo state = npc.GetType().GetProperty(R.Name("Npc.PoseNow"), All);
+            PropertyInfo state = npc.GetType().CProp(R.Name("Npc.PoseNow"), All);
             if (state == null || Convert.ToInt32(state.GetValue(npc, null)) == 0) { WakeUntil[npc] = 0f; return true; }
             object from = state.GetValue(npc, null);
             state.SetValue(npc, Enum.ToObject(state.PropertyType, 0), null);
-            FieldInfo d = npc.GetType().GetField(R.Name("Npc.RiseTime"), All);
+            FieldInfo d = npc.GetType().CField(R.Name("Npc.RiseTime"), All);
             float duration = d == null ? 0f : (float)d.GetValue(npc);
             WakeUntil[npc] = _time + duration;
             Log("AI: " + Describe(npc) + " wakes from spawn state " + from + ", getting up for " + duration + " s");
@@ -658,7 +658,7 @@ namespace EpidemicServer.Match
         private static void Steer(object npc, object target, float[] point)
         {
             Type t = npc.GetType();
-            t.GetProperty(R.Name("Npc.Target"), All).SetValue(npc, target, null);
+            t.CProp(R.Name("Npc.Target"), All).SetValue(npc, target, null);
             float next;
             if (!NavNext.TryGetValue(npc, out next) || _time >= next)
             {
@@ -682,11 +682,11 @@ namespace EpidemicServer.Match
             if (w == null)
             {
                 SetField(npc, R.Name("Npc.UseGoalPosition"), false);
-                t.GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, true, null);
+                t.CProp(R.Name("Npc.UseTarget"), All).SetValue(npc, true, null);
             }
             else
             {
-                t.GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
+                t.CProp(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
                 SetField(npc, R.Name("Npc.GoalPoint"), _g.Vector2(w[0], w[1]));
                 SetField(npc, R.Name("Npc.UseGoalPosition"), true);
             }
@@ -721,8 +721,8 @@ namespace EpidemicServer.Match
         /// <summary>Stops an NPC that is steering (no goal target, no goal position).</summary>
         public static void StopSteering(object npc)
         {
-            npc.GetType().GetProperty(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
-            npc.GetType().GetProperty(R.Name("Npc.Target"), All).SetValue(npc, null, null);
+            npc.GetType().CProp(R.Name("Npc.UseTarget"), All).SetValue(npc, false, null);
+            npc.GetType().CProp(R.Name("Npc.Target"), All).SetValue(npc, null, null);
             SetField(npc, R.Name("Npc.UseGoalPosition"), false);
             NavWaypoint.Remove(npc);
             NavNext.Remove(npc);
@@ -737,8 +737,8 @@ namespace EpidemicServer.Match
         public static bool LineClear(float[] from, float[] to)
         {
             object gm = _g.World;
-            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
-            object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
+            object collision = _g.WorldType.CField(R.Name("World.Collision"), All).GetValue(gm);
+            object tree = collision.GetType().CField(R.Name("Collision.Tree"), All).GetValue(collision);
             if (_lineCheck == null) _lineCheck = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
             return !(bool)_lineCheck.Invoke(tree, new[] { a, b, Enum.ToObject(_lineCheck.GetParameters()[2].ParameterType, 37), (object)false, true, false });
@@ -753,25 +753,25 @@ namespace EpidemicServer.Match
         public static List<float[]> Path(float[] from, float[] to, int iterations, bool force = false)
         {
             object gm = _g.World;
-            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
-            object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
+            object collision = _g.WorldType.CField(R.Name("World.Collision"), All).GetValue(gm);
+            object tree = collision.GetType().CField(R.Name("Collision.Tree"), All).GetValue(collision);
             MethodInfo blockedM = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
             bool blocked = (bool)blockedM.Invoke(tree, new[] { a, b, Enum.ToObject(blockedM.GetParameters()[2].ParameterType, 37), (object)false, true, false });
             if (!blocked && !force) return new List<float[]>();
-            object nav = _g.WorldType.GetProperty("NavMesh", All).GetValue(gm, null);
+            object nav = _g.WorldType.CProp("NavMesh", All).GetValue(gm, null);
             Type finder = R.Type("PathFinder");
             MethodInfo find = finder.GetMethods(All).First(m => m.Name == R.Name("PathFinder.Find") && m.GetParameters().Length == 5 && m.GetParameters()[0].ParameterType == a.GetType());
             object node = find.Invoke(null, new[] { a, b, nav, null, (object)iterations });
             if (node == null) return null;
-            PropertyInfo prev = node.GetType().GetProperty("Previous", All);
-            PropertyInfo edge = node.GetType().GetProperty("Edge", All);
+            PropertyInfo prev = node.GetType().CProp("Previous", All);
+            PropertyInfo edge = node.GetType().CProp("Edge", All);
             var points = new List<float[]>();
             for (object n = node; n != null && points.Count < 400; n = prev.GetValue(n, null))
             {
                 object e = edge.GetValue(n, null);
                 if (e == null) continue;
-                float[] mid = Vector(e.GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(e));
+                float[] mid = Vector(e.GetType().CField(R.Name("NavEdge.Mid"), All).GetValue(e));
                 if (mid[0] != 0 || mid[1] != 0) points.Add(mid);
             }
             // The returned node's chain runs from the start end toward the goal (probe: first midpoints near
@@ -783,27 +783,27 @@ namespace EpidemicServer.Match
         public static float[] Waypoint(float[] from, float[] to, float lookahead, int iterations)
         {
             object gm = _g.World;
-            object collision = _g.WorldType.GetField(R.Name("World.Collision"), All).GetValue(gm);
-            object tree = collision.GetType().GetField(R.Name("Collision.Tree"), All).GetValue(collision);
+            object collision = _g.WorldType.CField(R.Name("World.Collision"), All).GetValue(gm);
+            object tree = collision.GetType().CField(R.Name("Collision.Tree"), All).GetValue(collision);
             MethodInfo blockedM = tree.GetType().GetMethods(All).First(m => m.Name == R.Name("CollisionTree.LineBlocked") && m.GetParameters().Length == 6);
             object a = _g.Vector2(from[0], from[1]), b = _g.Vector2(to[0], to[1]);
             bool blocked = (bool)blockedM.Invoke(tree, new[] { a, b, Enum.ToObject(blockedM.GetParameters()[2].ParameterType, 37), (object)false, true, false });
             if (!blocked) return null;
-            object nav = _g.WorldType.GetProperty("NavMesh", All).GetValue(gm, null);
+            object nav = _g.WorldType.CProp("NavMesh", All).GetValue(gm, null);
             Type finder = R.Type("PathFinder");
             MethodInfo find = finder.GetMethods(All).First(m => m.Name == R.Name("PathFinder.Find") && m.GetParameters().Length == 5 && m.GetParameters()[0].ParameterType == a.GetType());
             object node = find.Invoke(null, new[] { a, b, nav, null, (object)iterations });
             if (node == null) return null;
-            PropertyInfo prev = node.GetType().GetProperty("Previous", All);
-            FieldInfo dist = node.GetType().GetField(R.Name("PathNode.Remaining"), All);
-            PropertyInfo edge = node.GetType().GetProperty("Edge", All);
+            PropertyInfo prev = node.GetType().CProp("Previous", All);
+            FieldInfo dist = node.GetType().CField(R.Name("PathNode.Remaining"), All);
+            PropertyInfo edge = node.GetType().CProp("Edge", All);
             if (!_pathLogged)
             {
                 _pathLogged = true;
                 var chain = new List<string>();
                 for (object n = node; n != null && chain.Count < 40; n = prev.GetValue(n, null))
                 {
-                    float[] mid = Vector(edge.GetValue(n, null).GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(n, null)));
+                    float[] mid = Vector(edge.GetValue(n, null).GetType().CField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(n, null)));
                     chain.Add(((float)dist.GetValue(n)).ToString("0") + "@(" + mid[0].ToString("0") + "," + mid[1].ToString("0") + ")");
                 }
                 Log("path: from (" + from[0].ToString("0") + "," + from[1].ToString("0") + ") to (" + to[0].ToString("0") + "," + to[1].ToString("0") + "), chain (remaining@edge midpoint, returned node first): " + string.Join(" ", chain.ToArray()));
@@ -814,7 +814,7 @@ namespace EpidemicServer.Match
             object pick = first;
             while (pick != null && (float)dist.GetValue(pick) > firstDist - lookahead) pick = prev.GetValue(pick, null);
             if (pick == null) return null;
-            float[] m2 = Vector(edge.GetValue(pick, null).GetType().GetField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(pick, null)));
+            float[] m2 = Vector(edge.GetValue(pick, null).GetType().CField(R.Name("NavEdge.Mid"), All).GetValue(edge.GetValue(pick, null)));
             if (m2[0] == 0 && m2[1] == 0) return null;
             return m2;
         }
@@ -827,11 +827,11 @@ namespace EpidemicServer.Match
             // human is dead; without one they only ever chase the human.
             bool playerUp = (bool)Prop(player, "IsActive") && !(bool)Prop(player, R.Name("Entity.Dead"));
             if (!playerUp && ChooseTarget == null) return;
-            foreach (object npc in (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(gm))
+            foreach (object npc in (Array)_g.WorldType.CField(R.Name("World.Npcs"), All).GetValue(gm))
             {
                 if (npc == null || !(bool)Prop(npc, "IsActive") || (bool)Prop(npc, R.Name("Entity.Dead")) || Passive.Contains(npc)) continue;
                 if (Prop(npc, R.Name("Entity.Team")).Equals(Prop(player, R.Name("Entity.Team")))) continue;   // allies (the companion, truckers) have their own AI
-                PropertyInfo petOwner = npc.GetType().GetProperty(R.Name("Fighter.Master"), All);
+                PropertyInfo petOwner = npc.GetType().CProp(R.Name("Fighter.Master"), All);
                 if (petOwner != null && petOwner.GetValue(npc, null) != null) continue;   // pets: RunPets
                 object target = ChooseTarget != null ? ChooseTarget(npc, player)
                               : NearestTarget(npc, playerUp ? new[] { player } : new object[0]);
@@ -864,7 +864,7 @@ namespace EpidemicServer.Match
                 double aimDegrees = Math.Abs(Math.Atan2(aim[0] * dy / dist - aim[1] * dx / dist, aim[0] * dx / dist + aim[1] * dy / dist)) * 180.0 / Math.PI;
                 if (aimDegrees > AttackAimDegrees) continue;
                 LastAttack[npc] = _time;
-                bool attacked = (bool)npc.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(npc, new[] { dir, ability });
+                bool attacked = (bool)npc.GetType().CMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(npc, new[] { dir, ability });
                 Log("AI: " + Describe(npc) + " attacks " + Describe(target) + " at " + dist.ToString("0") + " units with " + ability + (attacked ? "" : " (refused)"));
             }
         }
@@ -941,13 +941,13 @@ namespace EpidemicServer.Match
             foreach (SpecialMove m in moves)
             {
                 if (dist < m.Min || dist > m.Max) continue;
-                MethodInfo ready = m.Ability.GetType().GetMethod(R.Name("Ability.Ready"), All, null, new[] { typeof(bool) }, null);
+                MethodInfo ready = m.Ability.GetType().CMethod(R.Name("Ability.Ready"), All, null, new[] { typeof(bool) }, null);
                 if (ready != null && !(bool)ready.Invoke(m.Ability, new object[] { false })) continue;
                 // Moves go where the NPC faces (a charge launched while it still faced away ran off: specials test,
                 // 2026-10-10), so face the target first.
                 float[] d = Vector(dir);
                 _g.SetAim(npc, d[0], d[1]);
-                bool started = (bool)npc.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), m.Key.GetType() }, null).Invoke(npc, new[] { dir, m.Key });
+                bool started = (bool)npc.GetType().CMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), m.Key.GetType() }, null).Invoke(npc, new[] { dir, m.Key });
                 if (!started) continue;
                 LastSpecial[npc] = _time;
                 LastAttack[npc] = _time;
@@ -1003,7 +1003,7 @@ namespace EpidemicServer.Match
             float[] at = Position(npc);
             object best = null;
             float bestDist = float.MaxValue;
-            MethodInfo isEnemy = R.Type("Type.WorldObject").GetMethod(R.Name("Entity.Hostile"), All);
+            MethodInfo isEnemy = R.Type("Type.WorldObject").CMethod(R.Name("Entity.Hostile"), All);
             foreach (object c in candidates.Concat(ActivePets.Where(p => (bool)isEnemy.Invoke(npc, new[] { p }))))
             {
                 if (c == null || !(bool)Prop(c, "IsActive") || (bool)Prop(c, R.Name("Entity.Dead"))) continue;
@@ -1015,27 +1015,27 @@ namespace EpidemicServer.Match
 
         private static void RunPets(object gm)
         {
-            Array npcs = (Array)_g.WorldType.GetField(R.Name("World.Npcs"), All).GetValue(gm);
+            Array npcs = (Array)_g.WorldType.CField(R.Name("World.Npcs"), All).GetValue(gm);
             ActivePets.Clear();
-            IList heroes = (IList)_g.WorldType.GetProperty(R.Name("World.Heroes"), All).GetValue(gm, null);
+            IList heroes = (IList)_g.WorldType.CProp(R.Name("World.Heroes"), All).GetValue(gm, null);
             MethodInfo isEnemy = null;
             foreach (object pet in npcs)
             {
                 if (pet == null || !(bool)Prop(pet, "IsActive") || (bool)Prop(pet, R.Name("Entity.Dead"))) continue;
-                PropertyInfo ownerProp = pet.GetType().GetProperty(R.Name("Fighter.Master"), All);
+                PropertyInfo ownerProp = pet.GetType().CProp(R.Name("Fighter.Master"), All);
                 object owner = ownerProp == null ? null : ownerProp.GetValue(pet, null);
                 if (owner == null) continue;
                 ActivePets.Add(pet);
                 if (!(bool)Prop(owner, "IsActive") || (bool)Prop(owner, R.Name("Entity.Dead"))) { StopSteering(pet); continue; }
-                if (isEnemy == null) isEnemy = R.Type("Type.WorldObject").GetMethod(R.Name("Entity.Hostile"), All);
+                if (isEnemy == null) isEnemy = R.Type("Type.WorldObject").CMethod(R.Name("Entity.Hostile"), All);
                 WakeUp(pet);
                 float[] here = Position(pet), home = Position(owner);
                 // The owner's order first, then the nearest enemy near the pet or the owner.
                 object target = null;
-                FieldInfo order = pet.GetType().GetField(R.Name("World.TargetSlot"), All);
+                FieldInfo order = pet.GetType().CField(R.Name("World.TargetSlot"), All);
                 if (order != null && (int)order.GetValue(pet) >= 0)
                 {
-                    object o = _g.WorldType.GetMethod(R.Name("World.Object"), All, null, new[] { typeof(int) }, null).Invoke(gm, new object[] { (int)order.GetValue(pet) });
+                    object o = _g.WorldType.CMethod(R.Name("World.Object"), All, null, new[] { typeof(int) }, null).Invoke(gm, new object[] { (int)order.GetValue(pet) });
                     if (o != null && (bool)Prop(o, R.Name("Entity.IsLiving")) && (bool)Prop(o, "IsActive") && !(bool)Prop(o, R.Name("Entity.Dead"))) target = o;
                 }
                 if (target == null)
@@ -1064,16 +1064,16 @@ namespace EpidemicServer.Match
                 object ability;
                 if (!PetAttack.TryGetValue(pet, out ability))
                 {
-                    object bar = pet.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(pet, null);
-                    Array slots = bar == null ? null : (Array)bar.GetType().GetProperty(R.Name("Bar.Slots"), All).GetValue(bar, null);
-                    if (slots != null) foreach (object a in slots) if (a != null) { ability = a.GetType().GetProperty(R.Name("Ability.Key"), All).GetValue(a, null); break; }
+                    object bar = pet.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(pet, null);
+                    Array slots = bar == null ? null : (Array)bar.GetType().CProp(R.Name("Bar.Slots"), All).GetValue(bar, null);
+                    if (slots != null) foreach (object a in slots) if (a != null) { ability = a.GetType().CProp(R.Name("Ability.Key"), All).GetValue(a, null); break; }
                     PetAttack[pet] = ability;
                     if (_petsLogged++ < 5) Log("AI: pet " + Describe(pet) + " of " + Describe(owner) + " attacks with " + (ability ?? "(no ability)"));
                 }
                 float last;
                 if (ability == null || dist > AttackRange || (LastAttack.TryGetValue(pet, out last) && _time - last < AttackInterval)) continue;
                 LastAttack[pet] = _time;
-                pet.GetType().GetMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(pet, new[] { dir, ability });
+                pet.GetType().CMethod(R.Name("Fighter.Strike"), All, null, new[] { dir.GetType(), ability.GetType() }, null).Invoke(pet, new[] { dir, ability });
             }
         }
 
@@ -1096,14 +1096,14 @@ namespace EpidemicServer.Match
 
         public static float[] Vector(object v)
         {
-            return new[] { (float)v.GetType().GetField("X").GetValue(v), (float)v.GetType().GetField("Y").GetValue(v) };
+            return new[] { (float)v.GetType().CField("X").GetValue(v), (float)v.GetType().CField("Y").GetValue(v) };
         }
 
         public static object GetFieldValue(object o, string name)
         {
             for (Type t = o.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(name, All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(name, All | BindingFlags.DeclaredOnly);
                 if (f != null) return f.GetValue(o);
             }
             throw new MissingFieldException(o.GetType().FullName, name);
@@ -1113,7 +1113,7 @@ namespace EpidemicServer.Match
         {
             for (Type t = o.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(name, All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(name, All | BindingFlags.DeclaredOnly);
                 if (f == null) continue;
                 f.SetValue(o, value);
                 return;
@@ -1139,7 +1139,7 @@ namespace EpidemicServer.Match
                 for (Type t = o.GetType(); t != null && m == null; t = t.BaseType)
                     m = types == null
                         ? t.GetMethods(All | BindingFlags.DeclaredOnly).FirstOrDefault(x => x.Name == name)
-                        : t.GetMethod(name, All | BindingFlags.DeclaredOnly, null, types, null);
+                        : t.CMethod(name, All | BindingFlags.DeclaredOnly, null, types, null);
                 if (m == null) throw new MissingMethodException(o.GetType().FullName, name);
                 Cache[key] = m;
             }
@@ -1150,7 +1150,7 @@ namespace EpidemicServer.Match
         {
             for (Type t = o.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(name, All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(name, All | BindingFlags.DeclaredOnly);
                 if (f != null) return f.GetValue(o);
             }
             throw new MissingFieldException(o.GetType().FullName, name);
@@ -1158,12 +1158,12 @@ namespace EpidemicServer.Match
 
         private static object Prop(object o, string name)
         {
-            return o.GetType().GetProperty(name, All).GetValue(o, null);
+            return o.GetType().CProp(name, All).GetValue(o, null);
         }
 
         private static void Set(object boxedStruct, string field, object value)
         {
-            boxedStruct.GetType().GetField(field, All).SetValue(boxedStruct, value);
+            boxedStruct.GetType().CField(field, All).SetValue(boxedStruct, value);
         }
     }
 }

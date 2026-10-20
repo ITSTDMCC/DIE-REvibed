@@ -32,7 +32,7 @@ namespace EpidemicServer.Match
             b.Write(false);              // premium boost active
             b.Write(true);               // has player
             b.Write((ushort)playerIndex);
-            clientInfoData.GetType().GetMethod("Serialize", GameRuntime.All).Invoke(clientInfoData, new[] { b.Buffer, (object)true });
+            clientInfoData.GetType().CMethod("Serialize", GameRuntime.All).Invoke(clientInfoData, new[] { b.Buffer, (object)true });
             WriteGameInfo(b, gameInfo);
             return b.ToBytes();
         }
@@ -48,7 +48,7 @@ namespace EpidemicServer.Match
             GameBuffer b = GameBuffer.Create();
             b.Write(false);              // net debug
             b.Write(clientIndex);
-            client.GetType().GetMethod(R.Name("Net.WriteClientInfo"), GameRuntime.All).Invoke(client, new[] { b.Buffer, (object)true });
+            client.GetType().CMethod(R.Name("Net.WriteClientInfo"), GameRuntime.All).Invoke(client, new[] { b.Buffer, (object)true });
             WriteGameInfo(b, gameInfo);
             return b.ToBytes();
         }
@@ -56,7 +56,7 @@ namespace EpidemicServer.Match
         private static void WriteGameInfo(GameBuffer b, object gameInfo)
         {
             b.Write(true);               // has game info
-            gameInfo.GetType().GetMethod("Serialize", GameRuntime.All).Invoke(gameInfo, new[] { b.Buffer });
+            gameInfo.GetType().CMethod("Serialize", GameRuntime.All).Invoke(gameInfo, new[] { b.Buffer });
         }
     }
 }

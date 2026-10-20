@@ -129,7 +129,7 @@ namespace EpidemicServer.Match
         private void ChooseCharacterAndInfection(bool tutorial)
         {
             MatchLoadout l = MatchLoadout.Current;
-            Type characterEnum = Game.WorldType.GetMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
+            Type characterEnum = Game.WorldType.CMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
             string character = Enum.GetName(characterEnum, GameRuntime.DefaultHero);
             // The hero the hub queued with, the tutorial included (issue #1: the tutorial always used the default
             // hero). The tutorial still starts with fists at infection level 1, as the original.
@@ -160,23 +160,25 @@ namespace EpidemicServer.Match
         }
 
         /// <summary>
-        /// Scavenger's 11 bot heroes (3 teammates, 4 per rival team): random characters the hub lists with a model
-        /// (UnlockCatalog), never the human's. They are cached with the human's (MatchInfo.HeroCache). Other modes
-        /// cache only the human's hero.
+        /// Bot heroes: Scavenger's 11 (3 teammates, 4 per rival team) and Horde's 3 teammates: random characters
+        /// the hub lists with a model (UnlockCatalog), never the human's. They are cached with the human's
+        /// (MatchInfo.HeroCache). Other modes cache only the human's hero.
         /// </summary>
-        private void ChooseBotHeroes(bool scavenger)
+        private void ChooseBotHeroes(int count)
         {
             Game.ExtraCharacters.Clear();
-            if (!scavenger) return;
-            Type characterEnum = Game.WorldType.GetMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
+            if (count == 0) return;
+            Type characterEnum = Game.WorldType.CMethod(R.Name("World.Cache"), GameRuntime.All).GetParameters()[1].ParameterType.GetGenericArguments()[0];
             var pool = (UnlockCatalog.Ready && UnlockCatalog.Characters.Length > 0 ? UnlockCatalog.Characters.Select(id => (int)id) : Enumerable.Range(1, 13))
                 .Where(id => Enum.IsDefined(characterEnum, id)).Select(id => Enum.GetName(characterEnum, id)).Where(n => n != Game.Character).ToList();
             Random r = new Random();
-            Game.ExtraCharacters.AddRange(pool.OrderBy(x => r.Next()).Take(ScavengerBots));
-            Log.Info("match: Scavenger bot heroes: " + string.Join(", ", Game.ExtraCharacters.ToArray()));
+            Game.ExtraCharacters.AddRange(pool.OrderBy(x => r.Next()).Take(count));
+            Log.Info("match: bot heroes: " + string.Join(", ", Game.ExtraCharacters.ToArray()));
         }
 
         public const int ScavengerBots = 11;
+        /// <summary>Bot teammates in Horde (owner's request, 2026-10-17: play Horde with 3 AI teammates).</summary>
+        public const int HordeBots = 3;
 
         private Weapon AccountWeapon(ushort schematic)
         {
@@ -252,7 +254,7 @@ namespace EpidemicServer.Match
             Log.Info("match: loading the match client's game logic from " + _install);
             Game = GameRuntime.Load(_install);
             // Heroic Horde unlock (see RequestServerEncoders.HeroicUnlockXp).
-            RequestServerEncoders.HeroicUnlockXp = (uint)R.Type("Type.Levels").GetMethod(R.Name("Levels.XpFor"), GameRuntime.All)
+            RequestServerEncoders.HeroicUnlockXp = (uint)R.Type("Type.Levels").CMethod(R.Name("Levels.XpFor"), GameRuntime.All)
                 .Invoke(null, new object[] { RequestServerEncoders.HeroicUnlockLevel });
             RequestServerEncoders.FeatureAccount = _account;
             Log.Info("match: Heroic Horde unlocks at account level " + RequestServerEncoders.HeroicUnlockLevel + " (story map XP " + RequestServerEncoders.HeroicUnlockXp +
@@ -354,7 +356,7 @@ namespace EpidemicServer.Match
             else if (Game.ModeKind == GameRuntime.HordeGameModeType)
             {
                 Horde = new HordeDirector(Game, Player, line => Log.Info("match: " + line));
-                Horde.PopulateWorld();
+                Horde.PopulateWorld(Game.ExtraCharacters, level, melee, ranged, Spawn);
                 ServerHooks.AfterUpdate = Horde.Tick;
                 Horde.OnFinished = (placement, boxes) => EndMatch(boxes, placement);
             }
@@ -379,7 +381,7 @@ namespace EpidemicServer.Match
         {
             _session = null;
             ServerHooks.ResetMatchState();
-            Game.WorldType.GetMethod("Shutdown", GameRuntime.All, null, Type.EmptyTypes, null).Invoke(Game.World, null);
+            Game.WorldType.CMethod("Shutdown", GameRuntime.All, null, Type.EmptyTypes, null).Invoke(Game.World, null);
             Log.Info("match: previous match shut down");
         }
 
@@ -424,8 +426,9 @@ namespace EpidemicServer.Match
                     string oldCharacter = Game.Character;
                     int oldLevel = Game.MatchLevel;
                     ChooseCharacterAndInfection(wantedMode == GameRuntime.TutorialGameModeType);
-                    ChooseBotHeroes(wantedMode == GameRuntime.ScavengerHuntGameModeType);
-                    if (_matchUsed || wantedMode == GameRuntime.ScavengerHuntGameModeType || _wantedMap != Game.MapIndex || wantedMode != Game.ModeKind || wantedDifficulty != Game.Difficulty ||
+                    ChooseBotHeroes(wantedMode == GameRuntime.ScavengerHuntGameModeType ? ScavengerBots : wantedMode == GameRuntime.HordeGameModeType ? HordeBots : 0);
+                    // Bot heroes are random per match, so a match with bots is always built fresh.
+                    if (_matchUsed || wantedMode == GameRuntime.ScavengerHuntGameModeType || wantedMode == GameRuntime.HordeGameModeType || _wantedMap != Game.MapIndex || wantedMode != Game.ModeKind || wantedDifficulty != Game.Difficulty ||
                         oldCharacter != Game.Character || oldLevel != Game.MatchLevel)
                     {
                         Game.MapIndex = _wantedMap;
@@ -456,7 +459,7 @@ namespace EpidemicServer.Match
                     {
                         float[] camera = GameRuntime.Camera(connection);
                         Game.SetCamera(ClientInfoObject, camera[0], camera[1]);
-                        client.GetType().GetField(R.Name("Net.Connection"), GameRuntime.All).SetValue(client, connection);
+                        client.GetType().CField(R.Name("Net.Connection"), GameRuntime.All).SetValue(client, connection);
                         Log.Info("match: client camera direction (" + camera[0] + ", " + camera[1] + ") from its connect hail");
                     }
                     else Log.Warn("match: keeping the default camera direction (" + DefaultCameraX + ", " + DefaultCameraY + ")");

@@ -200,6 +200,34 @@ namespace EpidemicServer.Services
             Log.Info("matchmaking: server found for queue " + q.QueueType + ", map " + map + ": " + new IPAddress(_matchAddress) + ":" + _matchPort);
         }
 
+        /// <summary>
+        /// The owner's Horde map choice (ours, 2026-10-17: the hub has no map picker): the first word of
+        /// horde-map.txt next to the server, read at every queue. outpost, lab or club picks that map; anything
+        /// else, or no file, keeps the rotation. The file is created with "rotate" and a note if missing.
+        /// </summary>
+        private static int ChosenHordeMap()
+        {
+            string path = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "horde-map.txt");
+            try
+            {
+                if (!System.IO.File.Exists(path))
+                {
+                    System.IO.File.WriteAllText(path, "rotate\r\n\r\n# Horde map: write outpost, lab or club on the first line, or rotate.\r\n# Read at every match; no restart needed.\r\n");
+                    return 0;
+                }
+                string[] words = System.IO.File.ReadAllText(path).Split(new[] { '\r', '\n', ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                string first = words.Length > 0 ? words[0] : "";
+                switch (first.ToLowerInvariant())
+                {
+                    case "outpost": case "5": return 5;
+                    case "lab": case "6": return 6;
+                    case "club": case "7": return 7;
+                    default: return 0;
+                }
+            }
+            catch (Exception e) { Log.Warn("matchmaking: could not read " + path + ": " + e.Message); return 0; }
+        }
+
         private static int PickMap(int queueType)
         {
             if (queueType == 1)
@@ -210,6 +238,8 @@ namespace EpidemicServer.Services
             }
             if (queueType == 2 || queueType == 3)
             {
+                int chosen = ChosenHordeMap();
+                if (chosen > 0) return chosen;
                 int map = HordeMaps[_nextHordeMap % HordeMaps.Length];
                 _nextHordeMap++;
                 return map;

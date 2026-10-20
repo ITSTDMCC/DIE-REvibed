@@ -71,7 +71,7 @@ namespace EpidemicServer.Match
         /// <summary>World.InfectionScale(MatchLevel, map): the zombie stat multiplier for the level.</summary>
         public float InfectionModifier()
         {
-            MethodInfo m = R.Type("Type.Crafting").GetMethod(R.Name("World.InfectionScale"), All);
+            MethodInfo m = R.Type("Type.Crafting").CMethod(R.Name("World.InfectionScale"), All);
             return (float)m.Invoke(null, new[] { (object)MatchLevel, Enum.ToObject(m.GetParameters()[1].ParameterType, MapIndex) });
         }
 
@@ -92,7 +92,7 @@ namespace EpidemicServer.Match
         public string HeroName(int hero)
         {
             Type e = WorldType != null
-                ? WorldType.GetMethod(R.Name("World.Cache"), All).GetParameters()[1].ParameterType.GetGenericArguments()[0]
+                ? WorldType.CMethod(R.Name("World.Cache"), All).GetParameters()[1].ParameterType.GetGenericArguments()[0]
                 : _crafting.GetType(R.Name("Type.HeroId"), true);
             return Enum.GetName(e, hero);
         }
@@ -153,13 +153,13 @@ namespace EpidemicServer.Match
         public void CaptureGameLog(Action<string> line)
         {
             Type log = R.Type("Type.Log");
-            log.GetMethod(R.Name("Log.AddStream"), All).Invoke(null, new object[] { new GameLogStream(line) });
+            log.CMethod(R.Name("Log.AddStream"), All).Invoke(null, new object[] { new GameLogStream(line) });
         }
 
         /// <summary>The game's logger buffers per thread; flush the calling thread's buffer.</summary>
         public void FlushGameLog()
         {
-            R.Type("Type.Log").GetMethod(R.Name("Log.Flush"), All).Invoke(null, null);
+            R.Type("Type.Log").CMethod(R.Name("Log.Flush"), All).Invoke(null, null);
         }
 
         /// <summary>A type from the match client's ConductorCrafting.dll (rewards, account levels, items).</summary>
@@ -194,7 +194,7 @@ namespace EpidemicServer.Match
             Stream craftingData = new MemoryStream(craftingXml, false);
             log("roles: " + R.Count + " resolved by fingerprint in " + ResolveMillis + " ms");
             log("crafting data: " + craftingXml.Length + " bytes from the GameCraftingData text asset (in memory)");
-            R.Type("GameDataLoader").GetMethod("Load", All).Invoke(null, new object[] { _install });
+            R.Type("GameDataLoader").CMethod("Load", All).Invoke(null, new object[] { _install });
 
             WorldType = R.Type("Type.World");
             object view = Activator.CreateInstance(R.Type("ViewManagerStub"), new object[] { true });
@@ -202,12 +202,12 @@ namespace EpidemicServer.Match
             ServerHooks.Init(this);
             World = Activator.CreateInstance(Subclass(WorldType, "ServerGameManager", new[] { "get_IsServer" }, ServerHooks.Methods(WorldType)),
                 view, Path.Combine(_install, R.Name("Maps.List")), "", craftingData, false, null);
-            WorldType.GetField(R.Name("World.ThreadCurrent"), All).SetValue(null, World);
+            WorldType.CField(R.Name("World.ThreadCurrent"), All).SetValue(null, World);
 
             NetworkType = R.Type("Type.Network");
             Type clientType = R.Type("Type.Peer");
             Delegate createClient = Delegate.CreateDelegate(typeof(Func<,>).MakeGenericType(typeof(int), clientType), World,
-                WorldType.GetMethod(R.Name("Network.NewClient"), All));
+                WorldType.CMethod(R.Name("Network.NewClient"), All));
             Network = Activator.CreateInstance(Subclass(NetworkType, "ServerNetworkBase", new string[0]), MaxPlayers, MaxObservers, FpsLimit, createClient);
 
             if (ModeKind == TutorialGameModeType) Mode = Tutorial = Activator.CreateInstance(R.Type("TutorialMode"));
@@ -215,34 +215,34 @@ namespace EpidemicServer.Match
             else if (ModeKind == HordeGameModeType) Mode = Activator.CreateInstance(R.Type("Type.WaveRules"));
             else if (ModeKind == ScavengerHuntGameModeType) Mode = Activator.CreateInstance(R.Type("Type.ScavengeRules"));
             else throw new Exception("game mode type " + ModeKind + " is not supported");
-            WorldType.GetMethod("Initialize", All).Invoke(World, new[] { Network, null });
+            WorldType.CMethod("Initialize", All).Invoke(World, new[] { Network, null });
             // NPC stats are scaled by the server level and modifier, which start at 0
             // (zombies would spawn with 0 health). NPC stats use Hero.ServerMod x get enemy modifier
             // (get infection level modifiers); nothing in the client sets Hero.ServerMod past
             // Reset's 1. Inference: the server set it to World.InfectionScale(MatchLevel, map),
             // the infection level increase entry for the level, because the client's own walker-health readout
             // (get walker health) is that same product x get enemy modifier x 100.
-            WorldType.GetField(R.Name("World.Level"), All).SetValue(World, MatchLevel);
-            WorldType.GetField(R.Name("Hero.ServerMod"), All).SetValue(World, InfectionModifier());
-            MethodInfo addGameMode = WorldType.GetMethod(R.Name("World.SetMode"), All);
+            WorldType.CField(R.Name("World.Level"), All).SetValue(World, MatchLevel);
+            WorldType.CField(R.Name("Hero.ServerMod"), All).SetValue(World, InfectionModifier());
+            MethodInfo addGameMode = WorldType.CMethod(R.Name("World.SetMode"), All);
             addGameMode.Invoke(World, new[] { Enum.ToObject(addGameMode.GetParameters()[0].ParameterType, ModeKind), Mode });
 
             Type mapManager = R.Type("Type.Maps");
-            mapManager.GetMethod("Load", All, null, new[] { typeof(int) }, null).Invoke(null, new object[] { MapIndex });
-            MethodInfo cacheGame = WorldType.GetMethod(R.Name("World.Cache"), All);
+            mapManager.CMethod("Load", All, null, new[] { typeof(int) }, null).Invoke(null, new object[] { MapIndex });
+            MethodInfo cacheGame = WorldType.CMethod(R.Name("World.Cache"), All);
             Type characterEnum = cacheGame.GetParameters()[1].ParameterType.GetGenericArguments()[0];
             List<string> cached = CachedCharacters();
             Array characters = Array.CreateInstance(characterEnum, cached.Count);
             for (int i = 0; i < cached.Count; i++) characters.SetValue(Enum.Parse(characterEnum, cached[i]), i);
             // The pool sizes depend on the difficulty (World.cs, the Horde NPC table in -z/-y.cs), so it
             // is set before World.Cache, as the hail's MatchInfo.Difficulty tells the client.
-            FieldInfo difficulty = WorldType.GetField(R.Name("World.Difficulty"), All);
+            FieldInfo difficulty = WorldType.CField(R.Name("World.Difficulty"), All);
             difficulty.SetValue(World, Enum.ToObject(difficulty.FieldType, Difficulty));
             cacheGame.Invoke(World, new object[] { MapIndex, characters, false });
-            MapName = (string)mapManager.GetMethod(R.Name("Maps.Name"), All).Invoke(null, new object[] { MapIndex });
-            object settings = R.Type("Type.Mode").GetMethod(R.Name("Maps.Read"), All)
+            MapName = (string)mapManager.CMethod(R.Name("Maps.Name"), All).Invoke(null, new object[] { MapIndex });
+            object settings = R.Type("Type.Mode").CMethod(R.Name("Maps.Read"), All)
                 .Invoke(null, new object[] { MapName, Path.Combine(_install, R.Name("Maps.List")) });
-            WorldType.GetMethod(R.Name("World.Load"), All).Invoke(World, new[] { settings, (object)MapIndex });
+            WorldType.CMethod(R.Name("World.Load"), All).Invoke(World, new[] { settings, (object)MapIndex });
             log("loaded map " + MapIndex + " (" + MapName + "), game mode type " + ModeKind + ", SyncCount " + SyncCount);
 
             // The game mode's action interactions (role ActiveMode.ActionInteractions) start off on the server: ActiveMode.Reset turns
@@ -250,33 +250,33 @@ namespace EpidemicServer.Match
             // prompt, so X (capture, deliver) did nothing while G (a plain ability key) worked.
             // Mode.ActionsEnable is server-only code in the client (no caller there).
             object mode = ActiveMode;
-            mode.GetType().GetMethod(R.Name("Mode.ActionsEnable"), All).Invoke(mode, new object[] { true });
+            mode.GetType().CMethod(R.Name("Mode.ActionsEnable"), All).Invoke(mode, new object[] { true });
             log("action interactions on (" + ServerHooks.GetFieldValue(mode, R.Name("Mode.ActionsOn")) + ")");
 
             // ability manager (role ability manager) is only set by the client when it
             // connects; buffs such as the supply-carry buff read it and threw on the server. Use the static
             // balance data the rest of the game reads (World.Balance).
-            FieldInfo abilityManager = WorldType.GetField(R.Name("World.Skills"), All);
+            FieldInfo abilityManager = WorldType.CField(R.Name("World.Skills"), All);
             if (abilityManager.GetValue(World) == null)
             {
-                abilityManager.SetValue(World, WorldType.GetField(R.Name("World.Balance"), All).GetValue(null));
+                abilityManager.SetValue(World, WorldType.CField(R.Name("World.Balance"), All).GetValue(null));
                 log("ability manager set to the static World.Balance");
             }
 
-            foreach (object o in (IEnumerable)WorldType.GetProperty(R.Name("Map.All"), All).GetValue(World, null))
+            foreach (object o in (IEnumerable)WorldType.CProp(R.Name("Map.All"), All).GetValue(World, null))
             {
                 Type t = o.GetType();
                 // Horde maps have no player spawn point: the players start at the MapKind.Checkpoint marked Activated.
                 if (t.Name != R.Name("MapKind.HeroStart") && t.Name != R.Name("MapKind.CutsceneSpot") && t.Name != R.Name("MapKind.Checkpoint")) continue;
-                object pos = t.GetProperty("Position").GetValue(o, null);
+                object pos = t.CProp("Position").GetValue(o, null);
                 SpawnPoint sp = new SpawnPoint();
                 sp.Kind = t.Name;
-                FieldInfo team = t.GetField(R.Name("Record.Team"));
+                FieldInfo team = t.CField(R.Name("Record.Team"));
                 sp.Team = team == null ? R.Name("Team.One") : team.GetValue(o).ToString();
-                sp.IsStart = t.Name == R.Name("MapKind.HeroStart") ? (bool)t.GetField(R.Name("Msg.Starting")).GetValue(o)
+                sp.IsStart = t.Name == R.Name("MapKind.HeroStart") ? (bool)t.CField(R.Name("Msg.Starting")).GetValue(o)
                            : t.Name == R.Name("MapKind.Checkpoint") && Convert.ToBoolean(MapValue(o, "Activated"));
-                sp.X = (float)pos.GetType().GetField("X").GetValue(pos);
-                sp.Y = (float)pos.GetType().GetField("Y").GetValue(pos);
+                sp.X = (float)pos.GetType().CField("X").GetValue(pos);
+                sp.Y = (float)pos.GetType().CField("Y").GetValue(pos);
                 SpawnPoints.Add(sp);
             }
         }
@@ -288,7 +288,7 @@ namespace EpidemicServer.Match
         /// </summary>
         public List<string> DescribeMapObjects()
         {
-            List<object> objects = ((IEnumerable)WorldType.GetProperty(R.Name("Map.All"), All).GetValue(World, null)).Cast<object>().ToList();
+            List<object> objects = ((IEnumerable)WorldType.CProp(R.Name("Map.All"), All).GetValue(World, null)).Cast<object>().ToList();
             Dictionary<object, int> index = new Dictionary<object, int>();
             for (int i = 0; i < objects.Count; i++) if (!index.ContainsKey(objects[i])) index[objects[i]] = i;
             Type mapObject = R.Type("Type.MapThing");
@@ -297,7 +297,7 @@ namespace EpidemicServer.Match
             {
                 object o = objects[i];
                 Type t = o.GetType();
-                List<string> parts = new List<string> { i.ToString(), t.FullName, "Position " + t.GetProperty("Position").GetValue(o, null) };
+                List<string> parts = new List<string> { i.ToString(), t.FullName, "Position " + t.CProp("Position").GetValue(o, null) };
                 foreach (MemberInfo m in t.GetMembers(BindingFlags.Public | BindingFlags.Instance))
                 {
                     Type mt;
@@ -325,7 +325,7 @@ namespace EpidemicServer.Match
 
         public int SyncCount
         {
-            get { return (int)NetworkType.GetProperty(R.Name("Network.SyncCount"), All).GetValue(Network, null); }
+            get { return (int)NetworkType.CProp(R.Name("Network.SyncCount"), All).GetValue(Network, null); }
         }
 
         /// <summary>Spawn choice: a Team1 spawn point, else one marked IsStart, else the first; with none, the first teleport point.</summary>
@@ -344,21 +344,21 @@ namespace EpidemicServer.Match
         /// </summary>
         public object Human;
 
-        public object GetPlayer(int index) { return WorldType.GetMethod(R.Name("World.HeroAt"), All).Invoke(World, new object[] { index }); }
+        public object GetPlayer(int index) { return WorldType.CMethod(R.Name("World.HeroAt"), All).Invoke(World, new object[] { index }); }
 
         public object GetClient(int index)
         {
-            return NetworkType.GetMethod(R.Name("Network.ClientAt"), All, null, new[] { typeof(int) }, null).Invoke(Network, new object[] { index });
+            return NetworkType.CMethod(R.Name("Network.ClientAt"), All, null, new[] { typeof(int) }, null).Invoke(Network, new object[] { index });
         }
 
-        public object GetGameObject(int index) { return WorldType.GetMethod(R.Name("World.Object"), All).Invoke(World, new object[] { index }); }
+        public object GetGameObject(int index) { return WorldType.CMethod(R.Name("World.Object"), All).Invoke(World, new object[] { index }); }
 
         /// <summary>The synchronizable registered at a network index.</summary>
         public object GetSynchronizable(int index)
         {
-            IList list = (IList)NetworkType.GetField(R.Name("Network.SyncList"), All).GetValue(Network);
+            IList list = (IList)NetworkType.CField(R.Name("Network.SyncList"), All).GetValue(Network);
             object data = index < list.Count ? list[index] : null;
-            return data == null ? null : data.GetType().GetField(R.Name("SyncData.Payload"), All).GetValue(data);
+            return data == null ? null : data.GetType().CField(R.Name("SyncData.Payload"), All).GetValue(data);
         }
 
         /// <summary>
@@ -373,24 +373,24 @@ namespace EpidemicServer.Match
         {
             Type t = R.Type("Type.ClientCard");
             object info = Activator.CreateInstance(t);
-            t.GetField(R.Name("Client.Camera"), All).SetValue(info, Vector2(cameraX, cameraY));
-            t.GetField(R.Name("Client.Name"), All).SetValue(info, name);
-            t.GetField(R.Name("Client.Level"), All).SetValue(info, level);
-            FieldInfo teamField = t.GetField(R.Name("Client.Team"), All);
+            t.CField(R.Name("Client.Camera"), All).SetValue(info, Vector2(cameraX, cameraY));
+            t.CField(R.Name("Client.Name"), All).SetValue(info, name);
+            t.CField(R.Name("Client.Level"), All).SetValue(info, level);
+            FieldInfo teamField = t.CField(R.Name("Client.Team"), All);
             teamField.SetValue(info, Enum.Parse(teamField.FieldType, team));
-            if (melee != null) t.GetField(R.Name("Client.Melee"), All).SetValue(info, Unique(t.GetField(R.Name("Client.Melee"), All).FieldType, melee));
-            if (ranged != null) t.GetField(R.Name("Client.Ranged"), All).SetValue(info, Unique(t.GetField(R.Name("Client.Ranged"), All).FieldType, ranged));
+            if (melee != null) t.CField(R.Name("Client.Melee"), All).SetValue(info, Unique(t.CField(R.Name("Client.Melee"), All).FieldType, melee));
+            if (ranged != null) t.CField(R.Name("Client.Ranged"), All).SetValue(info, Unique(t.CField(R.Name("Client.Ranged"), All).FieldType, ranged));
             // The two gadget (trinket) slots (the client equips them from these when it connects).
             string[] slots = { R.Name("Client.Gadget1"), R.Name("Client.Gadget2") };
             for (int i = 0; gadgets != null && i < gadgets.Count && i < slots.Length; i++)
             {
-                FieldInfo f = t.GetField(slots[i], All);
+                FieldInfo f = t.CField(slots[i], All);
                 object g = Activator.CreateInstance(f.FieldType);
-                f.FieldType.GetField("GUID").SetValue(g, gadgets[i].Guid);
-                f.FieldType.GetField(R.Name("Craft.GadgetKey")).SetValue(g, gadgets[i].GadgetId);
-                f.FieldType.GetField(R.Name("Item.Owner")).SetValue(g, userId);
-                f.FieldType.GetField(R.Name("Item.Held")).SetValue(g, true);
-                f.FieldType.GetField(R.Name("Entity.StatBlock")).SetValue(g, gadgets[i].Stats);
+                f.FieldType.CField("GUID").SetValue(g, gadgets[i].Guid);
+                f.FieldType.CField(R.Name("Craft.GadgetKey")).SetValue(g, gadgets[i].GadgetId);
+                f.FieldType.CField(R.Name("Item.Owner")).SetValue(g, userId);
+                f.FieldType.CField(R.Name("Item.Held")).SetValue(g, true);
+                f.FieldType.CField(R.Name("Entity.StatBlock")).SetValue(g, gadgets[i].Stats);
                 f.SetValue(info, g);
             }
             return info;
@@ -399,13 +399,13 @@ namespace EpidemicServer.Match
         private static object Unique(Type uniqueType, Weapon w)
         {
             object u = Activator.CreateInstance(uniqueType);
-            uniqueType.GetField("Guid").SetValue(u, w.Guid);
-            uniqueType.GetField(R.Name("Craft.Blueprint")).SetValue(u, w.SchematicId);
-            uniqueType.GetField(R.Name("Item.Owner")).SetValue(u, w.UserId);
-            uniqueType.GetField(R.Name("Item.Held")).SetValue(u, true);
-            uniqueType.GetField(R.Name("Item.Wear")).SetValue(u, w.Durability);
-            uniqueType.GetField(R.Name("Item.Points")).SetValue(u, w.Ep);
-            uniqueType.GetField(R.Name("Item.Sockets")).SetValue(u, new byte[0]);
+            uniqueType.CField("Guid").SetValue(u, w.Guid);
+            uniqueType.CField(R.Name("Craft.Blueprint")).SetValue(u, w.SchematicId);
+            uniqueType.CField(R.Name("Item.Owner")).SetValue(u, w.UserId);
+            uniqueType.CField(R.Name("Item.Held")).SetValue(u, true);
+            uniqueType.CField(R.Name("Item.Wear")).SetValue(u, w.Durability);
+            uniqueType.CField(R.Name("Item.Points")).SetValue(u, w.Ep);
+            uniqueType.CField(R.Name("Item.Sockets")).SetValue(u, new byte[0]);
             return u;
         }
 
@@ -420,25 +420,25 @@ namespace EpidemicServer.Match
             GameBuffer b = GameBuffer.Wrap(clientHail);
             if (!b.ReadBool()) return null;
             object auth = Activator.CreateInstance(R.Type("Type.Auth"));
-            auth.GetType().GetMethod("Deserialize", All).Invoke(auth, new[] { b.Buffer });
+            auth.GetType().CMethod("Deserialize", All).Invoke(auth, new[] { b.Buffer });
             b.ReadBool();
             b.ReadBool();
             if (!b.ReadBool()) return null;
             object data = Activator.CreateInstance(R.Type("Type.Connection"));
-            data.GetType().GetMethod("Deserialize", All).Invoke(data, new[] { b.Buffer });
+            data.GetType().CMethod("Deserialize", All).Invoke(data, new[] { b.Buffer });
             return data;
         }
 
         /// <summary>Camera direction of a Net.Connection.</summary>
         public static float[] Camera(object data)
         {
-            object v = data.GetType().GetField(R.Name("ClientConnection.Camera"), All).GetValue(data);
-            return new[] { (float)v.GetType().GetField("X").GetValue(v), (float)v.GetType().GetField("Y").GetValue(v) };
+            object v = data.GetType().CField(R.Name("ClientConnection.Camera"), All).GetValue(data);
+            return new[] { (float)v.GetType().CField("X").GetValue(v), (float)v.GetType().CField("Y").GetValue(v) };
         }
 
         public void SetCamera(object clientInfoData, float x, float y)
         {
-            clientInfoData.GetType().GetField(R.Name("Client.Camera"), All).SetValue(clientInfoData, Vector2(x, y));
+            clientInfoData.GetType().CField(R.Name("Client.Camera"), All).SetValue(clientInfoData, Vector2(x, y));
         }
 
         /// <summary>
@@ -472,32 +472,32 @@ namespace EpidemicServer.Match
         /// <summary>Sets a bool field of the tutorial game mode itself, by role (e.g. TutorialMode.SwapWeaponsAllowed).</summary>
         public void SetTutorialFlag(string role, bool value)
         {
-            R.Type("TutorialMode").GetField(R.Name(role), All).SetValue(Tutorial, value);
+            R.Type("TutorialMode").CField(R.Name(role), All).SetValue(Tutorial, value);
         }
 
         /// <summary>Reads an int field of the tutorial state struct, by role.</summary>
         public int GetTutorialField(string role)
         {
-            object state = R.Type("TutorialMode").GetField(R.Name("TutorialMode.State"), All).GetValue(Tutorial);
-            return (int)state.GetType().GetField(R.Name(role), All).GetValue(state);
+            object state = R.Type("TutorialMode").CField(R.Name("TutorialMode.State"), All).GetValue(Tutorial);
+            return (int)state.GetType().CField(R.Name(role), All).GetValue(state);
         }
 
         /// <summary>A map object's field or property by name (null if it has neither).</summary>
         public static object MapValue(object mapObject, string name)
         {
             Type t = mapObject.GetType();
-            FieldInfo f = t.GetField(name, All);
+            FieldInfo f = t.CField(name, All);
             if (f != null) return f.GetValue(mapObject);
-            PropertyInfo p = t.GetProperty(name, All);
+            PropertyInfo p = t.CProp(name, All);
             return p == null ? null : p.GetValue(mapObject, null);
         }
 
         /// <summary>Sets an int field of the tutorial state struct, by role (e.g. the hint counters).</summary>
         public void SetTutorialField(string role, int value)
         {
-            FieldInfo holder = R.Type("TutorialMode").GetField(R.Name("TutorialMode.State"), All);
+            FieldInfo holder = R.Type("TutorialMode").CField(R.Name("TutorialMode.State"), All);
             object state = holder.GetValue(Tutorial);
-            state.GetType().GetField(R.Name(role), All).SetValue(state, value);
+            state.GetType().CField(R.Name(role), All).SetValue(state, value);
             holder.SetValue(Tutorial, state);
         }
 
@@ -511,25 +511,25 @@ namespace EpidemicServer.Match
         {
             Type cm = R.Type("Type.Crafting");
             Type scv = R.Type("Type.HeroTuning");
-            MethodInfo calc = scv.GetMethod(R.Name("HeroTuning.Strength"), All);
+            MethodInfo calc = scv.CMethod(R.Name("HeroTuning.Strength"), All);
             ParameterInfo[] ps = calc.GetParameters();
-            MethodInfo schematic = cm.GetMethod(R.Name("Craft.Weapon"), All);
+            MethodInfo schematic = cm.CMethod(R.Name("Craft.Weapon"), All);
             Type gadgetType = R.Type("Type.Gadget");
             IList list = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(gadgetType));
             if (gadgets != null)
                 foreach (Protocol.OwnedGadget og in gadgets)
                 {
                     object g = Activator.CreateInstance(gadgetType);
-                    gadgetType.GetField("GUID").SetValue(g, og.Guid);
-                    gadgetType.GetField(R.Name("Craft.GadgetKey")).SetValue(g, og.GadgetId);
-                    gadgetType.GetField(R.Name("Item.Owner")).SetValue(g, userId);
-                    gadgetType.GetField(R.Name("Item.Held")).SetValue(g, true);
-                    gadgetType.GetField(R.Name("Entity.StatBlock")).SetValue(g, og.Stats);
+                    gadgetType.CField("GUID").SetValue(g, og.Guid);
+                    gadgetType.CField(R.Name("Craft.GadgetKey")).SetValue(g, og.GadgetId);
+                    gadgetType.CField(R.Name("Item.Owner")).SetValue(g, userId);
+                    gadgetType.CField(R.Name("Item.Held")).SetValue(g, true);
+                    gadgetType.CField(R.Name("Entity.StatBlock")).SetValue(g, og.Stats);
                     list.Add(g);
                 }
             strength = (int)calc.Invoke(null, new[] { Enum.Parse(ps[0].ParameterType, character), (object)accountLevel,
                 melee == 0 ? null : schematic.Invoke(null, new object[] { (int)melee }), ranged == 0 ? null : schematic.Invoke(null, new object[] { (int)ranged }), list });
-            return (int)cm.GetMethod(R.Name("World.Infection"), All).Invoke(null, new object[] { strength });
+            return (int)cm.CMethod(R.Name("World.Infection"), All).Invoke(null, new object[] { strength });
         }
 
         /// <summary>The game info sent at the end of the hail.</summary>
@@ -537,17 +537,17 @@ namespace EpidemicServer.Match
         {
             Type t = R.Type("Type.MatchInfo");
             object info = Activator.CreateInstance(t);
-            t.GetField(R.Name("World.MapNumber")).SetValue(info, MapIndex);
-            t.GetField(R.Name("World.Level")).SetValue(info, matchLevel);
-            t.GetField(R.Name("MatchInfo.Server")).SetValue(info, serverId);
-            t.GetField(R.Name("MatchInfo.MaxLength")).SetValue(info, maxMatchLength);
+            t.CField(R.Name("World.MapNumber")).SetValue(info, MapIndex);
+            t.CField(R.Name("World.Level")).SetValue(info, matchLevel);
+            t.CField(R.Name("MatchInfo.Server")).SetValue(info, serverId);
+            t.CField(R.Name("MatchInfo.MaxLength")).SetValue(info, maxMatchLength);
             // Scavenger's targets: the new end game (truck full + win, as game mode settings defaults on the server)
             // and no target modifier; other modes ignore both.
-            t.GetField(R.Name("MatchInfo.NewEnding")).SetValue(info, true);
-            t.GetField(R.Name("MatchInfo.SupplyGoalScale")).SetValue(info, 1f);
-            FieldInfo difficulty = t.GetField(R.Name("MatchInfo.Difficulty"));
+            t.CField(R.Name("MatchInfo.NewEnding")).SetValue(info, true);
+            t.CField(R.Name("MatchInfo.SupplyGoalScale")).SetValue(info, 1f);
+            FieldInfo difficulty = t.CField(R.Name("MatchInfo.Difficulty"));
             difficulty.SetValue(info, Enum.ToObject(difficulty.FieldType, Difficulty));
-            FieldInfo cache = t.GetField(R.Name("MatchInfo.HeroCache"));
+            FieldInfo cache = t.CField(R.Name("MatchInfo.HeroCache"));
             List<string> cachedNames = CachedCharacters();
             Array characters = Array.CreateInstance(cache.FieldType.GetElementType(), cachedNames.Count);
             for (int i = 0; i < cachedNames.Count; i++) characters.SetValue(Enum.Parse(cache.FieldType.GetElementType(), cachedNames[i]), i);
@@ -555,21 +555,21 @@ namespace EpidemicServer.Match
             return info;
         }
 
-        public object ActiveMode { get { return WorldType.GetProperty(R.Name("World.Mode"), All).GetValue(World, null); } }
+        public object ActiveMode { get { return WorldType.CProp(R.Name("World.Mode"), All).GetValue(World, null); } }
 
         /// <summary>The game mode's supplies object; null for modes without one (WaveRules has no Mode.Supplies).</summary>
         public object Supplies
         {
             get
             {
-                PropertyInfo p = Mode.GetType().GetProperty(R.Name("Mode.Supplies"), All);
+                PropertyInfo p = Mode.GetType().CProp(R.Name("Mode.Supplies"), All);
                 return p == null ? null : p.GetValue(Mode, null);
             }
         }
 
         public int SynchronizableIndex(object o)
         {
-            return (int)NetworkType.GetMethod(R.Name("Network.SyncIndex"), All).Invoke(Network, new[] { o });
+            return (int)NetworkType.CMethod(R.Name("Network.SyncIndex"), All).Invoke(Network, new[] { o });
         }
 
         public object Vector2(float x, float y) { return Activator.CreateInstance(Game("FarseerPhysics.Common.Vector2"), x, y); }
@@ -584,15 +584,15 @@ namespace EpidemicServer.Match
             get
             {
                 if (Tutorial == null) return 0;   // not the tutorial
-                object state = R.Type("TutorialMode").GetField(R.Name("TutorialMode.State"), All).GetValue(Tutorial);
-                return Convert.ToInt32(state.GetType().GetField(R.Name("TutorialState.Stage"), All).GetValue(state));
+                object state = R.Type("TutorialMode").CField(R.Name("TutorialMode.State"), All).GetValue(Tutorial);
+                return Convert.ToInt32(state.GetType().CField(R.Name("TutorialState.Stage"), All).GetValue(state));
             }
             set
             {
                 if (Tutorial == null) return;
-                FieldInfo holder = R.Type("TutorialMode").GetField(R.Name("TutorialMode.State"), All);
+                FieldInfo holder = R.Type("TutorialMode").CField(R.Name("TutorialMode.State"), All);
                 object state = holder.GetValue(Tutorial);   // a boxed copy of the struct
-                FieldInfo stage = state.GetType().GetField(R.Name("TutorialState.Stage"), All);
+                FieldInfo stage = state.GetType().CField(R.Name("TutorialState.Stage"), All);
                 stage.SetValue(state, Enum.ToObject(stage.FieldType, value));
                 holder.SetValue(Tutorial, state);
             }
@@ -627,24 +627,24 @@ namespace EpidemicServer.Match
             object npc = TakeFromPool(Game(typeName));
             // An empty pool hands out a fresh object that isn't registered for sync (index 65535): the
             // client never cached one, so it could not be shown.
-            PropertyInfo index = npc.GetType().GetProperty(R.Name("Entity.GlobalIndex"), All);
+            PropertyInfo index = npc.GetType().CProp(R.Name("Entity.GlobalIndex"), All);
             if (index != null && Convert.ToInt32(index.GetValue(npc, null)) == 65535) throw new Exception("no " + typeName + " in the cached pool");
             ServerHooks.ForgetNpc(npc);
-            PropertyInfo teamProp = npc.GetType().GetProperty(R.Name("Entity.Team"), All);
+            PropertyInfo teamProp = npc.GetType().CProp(R.Name("Entity.Team"), All);
             teamProp.SetValue(npc, Enum.Parse(teamProp.PropertyType, team), null);
             object position = Vector2(x, y);
             ServerHooks.SetField(npc, "Position", position);
             try { ServerHooks.SetField(npc, R.Name("Map.Position"), position); } catch (MissingFieldException) { }
             if (direction != null && (direction[0] != 0 || direction[1] != 0)) SetAim(npc, direction[0], direction[1]);
-            npc.GetType().GetMethod(R.Name("Entity.Appear"), All, null, Type.EmptyTypes, null).Invoke(npc, null);
+            npc.GetType().CMethod(R.Name("Entity.Appear"), All, null, Type.EmptyTypes, null).Invoke(npc, null);
             SetMovement(npc);
 
-            object bar = npc.GetType().GetProperty(R.Name("Fighter.Bar"), All).GetValue(npc, null);
-            Array slots = bar == null ? null : (Array)bar.GetType().GetProperty(R.Name("Bar.Slots"), All).GetValue(bar, null);
+            object bar = npc.GetType().CProp(R.Name("Fighter.Bar"), All).GetValue(npc, null);
+            Array slots = bar == null ? null : (Array)bar.GetType().CProp(R.Name("Bar.Slots"), All).GetValue(bar, null);
             object primary = null;
             if (slots != null)
                 foreach (object ability in slots)
-                    if (ability != null) { primary = ability.GetType().GetProperty(R.Name("Ability.Key"), All).GetValue(ability, null); break; }
+                    if (ability != null) { primary = ability.GetType().CProp(R.Name("Ability.Key"), All).GetValue(ability, null); break; }
             if (primary == null) primary = Enum.Parse(R.Type("Type.AbilityKey"), R.Name("Ability.UndeadSwing"));
             ServerHooks.StrikeAbility[npc] = primary;
             return npc;
@@ -661,19 +661,19 @@ namespace EpidemicServer.Match
         private void SetMovement(object npc)
         {
             Type zombie = R.Type("Zombie.Base");
-            if (!zombie.IsInstanceOfType(npc) || (float)zombie.GetField(R.Name("Zombie.Base.Acceleration"), All).GetValue(npc) != 0f) return;
+            if (!zombie.IsInstanceOfType(npc) || (float)zombie.CField(R.Name("Zombie.Base.Acceleration"), All).GetValue(npc) != 0f) return;
             MethodInfo state = npc.GetType().GetMethods(All | BindingFlags.DeclaredOnly)
                 .FirstOrDefault(m => m.Name == R.Name("Zombie.SetMovementState") && m.GetParameters().Length == 1 && m.GetParameters()[0].ParameterType.IsEnum);
             if (state == null) return;
             state.Invoke(npc, new[] { Enum.ToObject(state.GetParameters()[0].ParameterType, 0) });
-            zombie.GetMethod(R.Name("Zombie.Base.WalkMode"), All).Invoke(npc, null);
+            zombie.CMethod(R.Name("Zombie.Base.WalkMode"), All).Invoke(npc, null);
         }
 
         /// <summary>Takes an object of the given type from the game's pool (not yet spawned).</summary>
         public object TakeFromPool(Type t)
         {
-            int typeId = (int)WorldType.GetMethod(R.Name("World.KindOf"), All).Invoke(null, new object[] { t });
-            object o = WorldType.GetMethod(R.Name("World.FromPool"), All).Invoke(World, new object[] { typeId, false });
+            int typeId = (int)WorldType.CMethod(R.Name("World.KindOf"), All).Invoke(null, new object[] { t });
+            object o = WorldType.CMethod(R.Name("World.FromPool"), All).Invoke(World, new object[] { typeId, false });
             if (o == null) throw new Exception("no " + t.FullName + " left in the pool");
             return o;
         }
@@ -682,11 +682,11 @@ namespace EpidemicServer.Match
         public void SetAim(object character, float x, float y)
         {
             object dir = Vector2(x, y);
-            PropertyInfo aim = character.GetType().GetProperty(R.Name("Fighter.Aim"), All);
+            PropertyInfo aim = character.GetType().CProp(R.Name("Fighter.Aim"), All);
             if (aim != null) aim.SetValue(character, dir, null);
             for (Type t = character.GetType(); t != null; t = t.BaseType)
             {
-                FieldInfo f = t.GetField(R.Name("Fighter.AimGoal"), All | BindingFlags.DeclaredOnly);
+                FieldInfo f = t.CField(R.Name("Fighter.AimGoal"), All | BindingFlags.DeclaredOnly);
                 if (f != null) { f.SetValue(character, dir); break; }
             }
         }
@@ -694,14 +694,14 @@ namespace EpidemicServer.Match
         /// <summary>The loaded map's objects.</summary>
         public List<object> MapThings()
         {
-            return ((IEnumerable)WorldType.GetProperty(R.Name("Map.All"), All).GetValue(World, null)).Cast<object>().ToList();
+            return ((IEnumerable)WorldType.CProp(R.Name("Map.All"), All).GetValue(World, null)).Cast<object>().ToList();
         }
 
-        public float[] MapPosition(object mapObject) { return ServerHooks.Vector(mapObject.GetType().GetProperty("Position").GetValue(mapObject, null)); }
+        public float[] MapPosition(object mapObject) { return ServerHooks.Vector(mapObject.GetType().CProp("Position").GetValue(mapObject, null)); }
 
         public float[] MapDirection(object mapObject)
         {
-            PropertyInfo d = mapObject.GetType().GetProperty("Direction", All);
+            PropertyInfo d = mapObject.GetType().CProp("Direction", All);
             return d == null ? new float[] { 0, 0 } : ServerHooks.Vector(d.GetValue(mapObject, null));
         }
 
@@ -715,8 +715,8 @@ namespace EpidemicServer.Match
             Type gob = R.Type("Type.WorldObject");
             Type character = R.Type("Type.Fighter");
             Type abilityBar = R.Type("Type.Bar");
-            PropertyInfo isActive = gob.GetProperty("IsActive", All);
-            PropertyInfo bar = character.GetProperty(R.Name("Fighter.Bar"), All);
+            PropertyInfo isActive = gob.CProp("IsActive", All);
+            PropertyInfo bar = character.CProp(R.Name("Fighter.Bar"), All);
             int n = SyncCount;
             object[] all = new object[n];
             HashSet<object> activeBars = new HashSet<object>();
@@ -763,7 +763,7 @@ namespace EpidemicServer.Match
             {
                 object p;
                 try { p = GetPlayer(i); } catch (Exception) { break; }
-                if (p != null && p.GetType().GetProperty(R.Name("Type.HeroId"), All).GetValue(p, null).ToString() == character) return i;
+                if (p != null && p.GetType().CProp(R.Name("Type.HeroId"), All).GetValue(p, null).ToString() == character) return i;
             }
             return -1;
         }
@@ -778,45 +778,45 @@ namespace EpidemicServer.Match
             int playerIndex = PlayerIndexOf(character);
             if (playerIndex < 0) throw new Exception("no cached player for " + character);
             object player = GetPlayer(playerIndex);
-            int typeId = (int)WorldType.GetMethod(R.Name("World.KindOf"), All).Invoke(null, new object[] { player.GetType() });
-            WorldType.GetMethod(R.Name("World.FromPool"), All).Invoke(World, new object[] { typeId, false });
+            int typeId = (int)WorldType.CMethod(R.Name("World.KindOf"), All).Invoke(null, new object[] { player.GetType() });
+            WorldType.CMethod(R.Name("World.FromPool"), All).Invoke(World, new object[] { typeId, false });
 
             object client = GetClient(clientIndex);
             Type ct = client.GetType();
-            ct.GetProperty(R.Name("Client.HeroSlot"), All).SetValue(client, playerIndex, null);
-            ct.GetProperty(R.Name("Record.Account"), All).SetValue(client, steamId, null);
-            ct.GetProperty(R.Name("Item.Owner"), All).SetValue(client, userId, null);
-            if (clientInfoData != null) ct.GetField(R.Name("Net.ClientCard"), All).SetValue(client, clientInfoData);
-            ct.GetProperty("IsConnected", All).SetValue(client, true, null);
+            ct.CProp(R.Name("Client.HeroSlot"), All).SetValue(client, playerIndex, null);
+            ct.CProp(R.Name("Record.Account"), All).SetValue(client, steamId, null);
+            ct.CProp(R.Name("Item.Owner"), All).SetValue(client, userId, null);
+            if (clientInfoData != null) ct.CField(R.Name("Net.ClientCard"), All).SetValue(client, clientInfoData);
+            ct.CProp("IsConnected", All).SetValue(client, true, null);
             // The game's own network layer would list the client as active and connected.
             // GM.Update sends destroy messages to the connected clients, and Spawn()
             // marks objects for the active ones, so put client 0 in both lists.
             foreach (string list in new[] { R.Name("Network.Active"), R.Name("Network.Connected") })
             {
-                IList clients = (IList)NetworkType.GetProperty(list, All).GetValue(Network, null);
+                IList clients = (IList)NetworkType.CProp(list, All).GetValue(Network, null);
                 if (!clients.Contains(client)) clients.Add(client);
             }
-            ct.GetMethod(R.Name("World.Created"), All).Invoke(client, new[] { World });
-            ct.GetMethod(R.Name("Client.Control"), All).Invoke(client, new[] { player });
-            ct.GetMethod(R.Name("Client.Watch"), All).Invoke(client, new[] { player });
+            ct.CMethod(R.Name("World.Created"), All).Invoke(client, new[] { World });
+            ct.CMethod(R.Name("Client.Control"), All).Invoke(client, new[] { player });
+            ct.CMethod(R.Name("Client.Watch"), All).Invoke(client, new[] { player });
             // Kill XP (role KillXp.Award) goes to Network.Heroes near the kill; the client
             // adds its local player there in World.Created, which ran before the player was set.
-            IList connected = (IList)WorldType.GetProperty(R.Name("Network.Heroes"), All).GetValue(World, null);
+            IList connected = (IList)WorldType.CProp(R.Name("Network.Heroes"), All).GetValue(World, null);
             if (!connected.Contains(player)) connected.Add(player);
             if (clientIndex == 0) { ServerHooks.Client0 = client; Human = player; }
 
             Type pt = player.GetType();
-            if (bot) pt.GetField(R.Name("Hero.Bot"), All).SetValue(player, true);
-            PropertyInfo teamProp = pt.GetProperty(R.Name("Entity.Team"), All);
+            if (bot) pt.CField(R.Name("Hero.Bot"), All).SetValue(player, true);
+            PropertyInfo teamProp = pt.CProp(R.Name("Entity.Team"), All);
             teamProp.SetValue(player, Enum.Parse(teamProp.PropertyType, team), null);
             object position = Vector2(spawn.X, spawn.Y);
-            pt.GetField("Position", All).SetValue(player, position);
-            pt.GetField(R.Name("Map.Position"), All).SetValue(player, position);
+            pt.CField("Position", All).SetValue(player, position);
+            pt.CField(R.Name("Map.Position"), All).SetValue(player, position);
             // The account level decides which class abilities the player has (owner, leveling step 5):
             // Hero.SetRank before Spawn, as the hail's ClientInfoObject level says.
-            pt.GetMethod(R.Name("Hero.SetRank"), All).Invoke(player, new object[] { accountLevel });
-            pt.GetMethod(R.Name("Entity.Appear"), All, null, Type.EmptyTypes, null).Invoke(player, null);
-            if (!bot) R.Type("Type.Mode").GetField(R.Name("World.Started"), All).SetValue(ActiveMode, true);
+            pt.CMethod(R.Name("Hero.SetRank"), All).Invoke(player, new object[] { accountLevel });
+            pt.CMethod(R.Name("Entity.Appear"), All, null, Type.EmptyTypes, null).Invoke(player, null);
+            if (!bot) R.Type("Type.Mode").CField(R.Name("World.Started"), All).SetValue(ActiveMode, true);
             return player;
         }
 
@@ -907,7 +907,7 @@ namespace EpidemicServer.Match
             il.Emit(OpCodes.Ldstr, h.Key);
             il.Emit(OpCodes.Ldarg_0);
             il.Emit(OpCodes.Ldloc, args);
-            il.Emit(OpCodes.Call, typeof(ServerHooks).GetMethod("Dispatch"));
+            il.Emit(OpCodes.Call, typeof(ServerHooks).CMethod("Dispatch"));
             LocalBuilder result = il.DeclareLocal(typeof(object));
             il.Emit(OpCodes.Stloc, result);
             for (int i = 0; i < ps.Length; i++)

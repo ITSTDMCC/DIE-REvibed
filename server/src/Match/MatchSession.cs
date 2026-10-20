@@ -61,18 +61,18 @@ namespace EpidemicServer.Match
             _send = send;
             _ordered = NewLayer("ReliableOrdered");
             _unordered = NewLayer("ReliableUnordered");
-            _readOrdered = _ordered.GetType().GetMethod(R.Name("ReliableOrdered.Read"), GameRuntime.All);
-            _readUnordered = _unordered.GetType().GetMethod(R.Name("ReliableUnordered.Read"), GameRuntime.All);
-            _sendOrdered = _ordered.GetType().GetMethod("Send", GameRuntime.All);
-            _sendUnordered = _unordered.GetType().GetMethod("Send", GameRuntime.All);
+            _readOrdered = _ordered.GetType().CMethod(R.Name("ReliableOrdered.Read"), GameRuntime.All);
+            _readUnordered = _unordered.GetType().CMethod(R.Name("ReliableUnordered.Read"), GameRuntime.All);
+            _sendOrdered = _ordered.GetType().CMethod("Send", GameRuntime.All);
+            _sendUnordered = _unordered.GetType().CMethod("Send", GameRuntime.All);
             _onMessage = Delegate.CreateDelegate(_readOrdered.GetParameters()[1].ParameterType, this,
-                typeof(MatchSession).GetMethod("OnMessage", BindingFlags.NonPublic | BindingFlags.Instance));
-            _update = game.WorldType.GetMethod("Update", GameRuntime.All, null, new[] { typeof(float), typeof(float), typeof(int) }, null);
-            _controllerIn = _client.GetType().GetMethod(R.Name("Net.ReadInput"), GameRuntime.All);
+                typeof(MatchSession).CMethod("OnMessage", BindingFlags.NonPublic | BindingFlags.Instance));
+            _update = game.WorldType.CMethod("Update", GameRuntime.All, null, new[] { typeof(float), typeof(float), typeof(int) }, null);
+            _controllerIn = _client.GetType().CMethod(R.Name("Net.ReadInput"), GameRuntime.All);
             // Reliable game messages from the server hooks (e.g. destroy) go on the in-order layer, channel 0.
-            _queueOrdered = _ordered.GetType().GetMethod(R.Name("ReliableOrdered.Queue"), GameRuntime.All);
+            _queueOrdered = _ordered.GetType().CMethod(R.Name("ReliableOrdered.Queue"), GameRuntime.All);
             _ackIgnored = Delegate.CreateDelegate(_queueOrdered.GetParameters()[3].ParameterType,
-                typeof(MatchSession).GetMethod("IgnoreAck", BindingFlags.NonPublic | BindingFlags.Static));
+                typeof(MatchSession).CMethod("IgnoreAck", BindingFlags.NonPublic | BindingFlags.Static));
             ServerHooks.QueueReliable = message => _queueOrdered.Invoke(_ordered, new[] { (object)Time, message, 0, _ackIgnored, 0.1f });
             // Bot heroes (Scavenger): tell the client who they are before their players sync.
             BotDriver.AnnounceBots(game);
@@ -83,8 +83,8 @@ namespace EpidemicServer.Match
         {
             Type t = R.Type(role);
             object layer = Activator.CreateInstance(t, true);
-            FieldInfo callback = t.GetField(R.Name(role + ".Callback"), GameRuntime.All);
-            callback.SetValue(layer, Delegate.CreateDelegate(callback.FieldType, typeof(MatchSession).GetMethod("Ignore", BindingFlags.NonPublic | BindingFlags.Static)));
+            FieldInfo callback = t.CField(R.Name(role + ".Callback"), GameRuntime.All);
+            callback.SetValue(layer, Delegate.CreateDelegate(callback.FieldType, typeof(MatchSession).CMethod("Ignore", BindingFlags.NonPublic | BindingFlags.Static)));
             return layer;
         }
 

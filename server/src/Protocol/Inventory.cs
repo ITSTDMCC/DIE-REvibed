@@ -12,8 +12,38 @@ namespace EpidemicServer.Protocol
         public bool InBag = true;
         public int Durability = FullDurability;
         public int Ep;
+        /// <summary>
+        /// The weapon's design slots as the game stores them (Unique.Slots): byte version 0, byte count,
+        /// then per slot byte slot id and ushort perk id. Empty: no designs.
+        /// </summary>
+        public byte[] Slots = new byte[0];
 
         public const int FullDurability = 100;
+
+        /// <summary>The design slots as slot id -> perk id.</summary>
+        public SortedDictionary<byte, ushort> ReadSlots()
+        {
+            var slots = new SortedDictionary<byte, ushort>();
+            if (Slots == null || Slots.Length < 2 || Slots[0] != 0) return slots;
+            for (int i = 0, at = 2; i < Slots[1] && at + 3 <= Slots.Length; i++, at += 3)
+                slots[Slots[at]] = (ushort)(Slots[at + 1] | Slots[at + 2] << 8);
+            return slots;
+        }
+
+        public void WriteSlots(SortedDictionary<byte, ushort> slots)
+        {
+            byte[] b = new byte[2 + 3 * slots.Count];
+            b[1] = (byte)slots.Count;
+            int at = 2;
+            foreach (KeyValuePair<byte, ushort> s in slots)
+            {
+                b[at] = s.Key;
+                b[at + 1] = (byte)s.Value;
+                b[at + 2] = (byte)(s.Value >> 8);
+                at += 3;
+            }
+            Slots = b;
+        }
     }
 
     /// <summary>A stack of an item (crafting.Stackable): id, stackable type, amount.</summary>
@@ -70,7 +100,7 @@ namespace EpidemicServer.Protocol
             w.WriteBool(u.InBag);
             w.WriteVarInt32(u.Durability);
             w.WriteVarInt32(u.Ep);
-            w.WriteVarUInt32(0);  // no slots
+            w.WriteBytes(u.Slots ?? new byte[0]);  // design slots (empty: none)
         }
 
         /// <summary>

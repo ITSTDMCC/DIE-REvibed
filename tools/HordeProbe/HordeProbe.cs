@@ -29,6 +29,14 @@ public static class HordeProbe
             game.MapIndex = map;
             game.ModeKind = map >= 15 ? GameRuntime.ScoutMissionGameModeType : GameRuntime.HordeGameModeType;   // pools: Scout maps too
             game.Difficulty = args.Length > 3 ? int.Parse(args[3]) : 1;
+            if (Environment.GetEnvironmentVariable("BOTS") != null)
+            {
+                // Three bot teammates, cached with the player's hero as the match server does (MatchHost.ChooseBotHeroes).
+                Type characterEnum = R.Type("Type.World").GetMethod(R.Name("World.Cache"), all).GetParameters()[1].ParameterType.GetGenericArguments()[0];
+                game.ExtraCharacters.AddRange(Enumerable.Range(1, 13).Where(id => Enum.IsDefined(characterEnum, id)).Select(id => Enum.GetName(characterEnum, id))
+                                                        .Where(n => n != game.Character).Take(MatchHost.HordeBots));
+                Console.WriteLine("bot heroes: " + string.Join(", ", game.ExtraCharacters.ToArray()));
+            }
             game.Start(line => Console.WriteLine("   " + line));
             if (args.Length > 2 && args[2] == "pools")
             {
@@ -99,7 +107,7 @@ public static class HordeProbe
                 return 0;
             }
             var dir = new HordeDirector(game, player, line => Console.WriteLine("     " + line));
-            dir.PopulateWorld();
+            dir.PopulateWorld(game.ExtraCharacters, level, melee, ranged, sp);
             ServerHooks.AfterUpdate = dir.Tick;
             var leveling = new Leveling(game, player, line => Console.WriteLine("     " + line));
             leveling.Install();
